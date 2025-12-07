@@ -1,0 +1,29 @@
+# To use:
+#   $ conda env create -f environment.yml
+#   $ conda activate <name>
+#   $ python -m ipykernel install --user --name <something>
+name: thesis_env
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - ipython
+  - pip
+  - pandas
+  - numpy
+  - ipykernel 
+  - ipywidgets
+  - pyodbc
+  - requests
+  - pytest
+  - configparser
+  - matplotlib
+  - flake8
+  - seaborn
+  - scipy
+  - scikit-learn
+  - python-dotenv
+  - rdflib
+  - pip: 
+    - semantic-kernel
