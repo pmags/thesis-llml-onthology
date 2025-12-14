@@ -25,5 +25,12 @@ dependencies:
   - scikit-learn
   - python-dotenv
   - rdflib
+  - spacy
+  - nltk
+  - pydotplus
+  - graphviz
+  - python-graphviz
   - pip: 
     - semantic-kernel
+    - kglab
+    - openai

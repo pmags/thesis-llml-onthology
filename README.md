@@ -121,12 +121,15 @@ conda env export > environment.yml
 
 ```
 thesis-llml-onthology/
-├── .devcontainer/          # Dev container configuration
-│   ├── devcontainer.json   # Container settings and VS Code extensions
-│   ├── Dockerfile          # Container image definition
-│   └── noop.txt           # Placeholder file for build process
-├── environment.yml         # Conda environment specification
-└── README.md              # This file
+├── src/                  # Modules to be used during analysis
+├── notebooks/            # Contains analysis notebooks
+├── tests/                # Contains test files
+├── .devcontainer/        # Dev container configuration
+│   ├── devcontainer.json # Container settings and VS Code extensions
+│   ├── Dockerfile        # Container image definition
+│   └── noop.txt          # Placeholder file for build process
+├── environment.yml       # Conda environment specification
+└── README.md             # This file
 ```
 
 ## Working with Jupyter Notebooks
@@ -161,11 +164,3 @@ conda activate thesis_env
 - [VS Code Dev Containers Documentation](https://code.visualstudio.com/docs/devcontainers/containers)
 - [Conda Documentation](https://docs.conda.io/)
 - [Miniconda Documentation](https://docs.conda.io/en/latest/miniconda.html)
-
-## License
-
-[Add your license information here]
-
-## Contributing
-
-[Add contribution guidelines here]
