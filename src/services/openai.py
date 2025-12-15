@@ -1,6 +1,8 @@
 ## This module includes methods to call and use openai services
 
 import os
+import json
+import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -51,9 +53,66 @@ class ChatGpt:
         )
         return response.output_text
 
+    def get_similarity(self, pairs_table: pd.DataFrame) -> pd.DataFrame:
+        """_summary_
+        Function to get similarity between pairs of terms using OpenAI API
+
+        Args:
+            pairs_table (pd.DataFrame): DataFrame with columns 'category_x' and 'category_y' representing pairs of terms.
+
+        Returns:
+            pd.DataFrame: DataFrame with an additional column 'similarity' indicating the similarity score between the term pairs.
+        """        
+        
+        # TODO: This method is dependent on specific column names in the input DataFrame.
+        
+        # serialize into a json to make it simpler to add to prompt
+        
+        terms_pairs_json = pairs_table.to_json(orient='records')
+        
+        prompt_template =f"""
+        In this survey you'll be asked to rate quantitatively, on a scale, the intensity of the semantic relatedness between pairs 
+        of affective words. Please, before starting, read carefully the instructions and the examples provided.
+
+        The question we're asking is: how much related are the two words? Vaguely related words should be scored with lower 
+        values, and strongly related words with higher values. Please note that opposite words frequently present high values 
+        of relatedness.
+
+        For example, the words 'modest' and 'smart' don't seem very related. 'Conceal' and 'mask' seem very related. 
+        'Confident' is highly related with itself. 'Violent' and 'pacific', being opposite words, are frequently related, 
+        just like 'happiness' and 'sadness'.
+
+        Examples:
+        [
+            {{"category_x":"modest","category_y":"smart","similarity":1}},
+            {{"category_x":"conceal","category_y":"mask","similarity":4}},
+            {{"category_x":"confident","category_y":"confident","similarity":5}},
+            {{"category_x":"violent","category_y":"pacific","similarity":4}},
+            {{"category_x":"happiness","category_y":"sadness","similarity":5}}
+        ]
+
+        Using the schema i provide and not encapsulate the output in code blocks, 
+        please rate from 0 to 4 the semantic relatedness of the following pairs of words, 
+        with 0 indicating words not related at all and 4 indicating very related words:
+        {terms_pairs_json}
+        """
+        
+        calc = self.chat(
+            instructions="You are a taxonomy and ontology expert. Provide concise and accurate responses based on the user's queries.",
+            input=prompt_template
+        )
+        
+        df = pd.DataFrame(json.loads(calc), columns=["category_x", "category_y", "similarity"])
+        
+        return df
+        
+
     # get environment variables
     def _get_env_variables(self) -> None:
         """_summary_
+            fetch OpenAI API key from environment variables.
+        Returns:
+            str: The OpenAI API key.
         """
         load_dotenv()
         self.api_key = os.getenv("OPENAI_API_KEY")

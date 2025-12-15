@@ -30,6 +30,9 @@ dependencies:
   - pydotplus
   - graphviz
   - python-graphviz
+  - sqlite
+  - libsqlite
+  
   - pip: 
     - semantic-kernel
     - kglab
