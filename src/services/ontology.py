@@ -6,6 +6,24 @@ from IPython.display import display, Image
 from rdflib.tools.rdf2dot import rdf2dot
 
 class Ontology:
+    """
+    Ontology class for building, serializing, and visualizing an ontology graph.
+    This class provides methods to construct an RDFLib graph from a given set of terms 
+    and clusters, serialize the graph into various formats, and visualize the graph 
+    using pydotplus and IPython display.
+    Attributes:
+        terms (list[str] or None): A list of terms to include in the ontology.
+        clusters_df (DataFrame or None): A dataframe containing cluster information 
+            with columns 'cluster', 'cluster_name', and 'term'.
+        rdf (Graph): An RDFLib Graph representing the ontology.
+        turtle (str or None): The serialized ontology in Turtle format.
+        related_namespace (Namespace): RDF namespace for related terms.
+        base_namespace (Namespace): RDF base namespace for the ontology.
+    Methods:
+        build_ontology(clusters_df): Builds an ontology graph from the given clusters dataframe.
+        serialize_ontology(format): Serializes the ontology graph into the specified format.
+        visualize(): Visualizes the ontology graph using pydotplus and IPython display.
+    """
     
     def __init__(self):
         self.terms = None
@@ -55,8 +73,7 @@ class Ontology:
     
         self.rdf = g
         return self.rdf
-    
-    
+
     def serialize_ontology(self, format: str = "turtle") -> str:
         """
         Serializes the ontology graph into the specified format.
@@ -69,7 +86,6 @@ class Ontology:
         """
         self.turtle = self.rdf.serialize(format=format)
         return self.turtle
-    
     
     def visualize(self) -> None:
         """

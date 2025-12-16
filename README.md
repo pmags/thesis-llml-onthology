@@ -10,7 +10,8 @@ This project uses a **Dev Container** with **Miniconda** to ensure a consistent 
 
 - [Docker](https://www.docker.com/products/docker-desktop) installed on your machine
 - [Visual Studio Code](https://code.visualstudio.com/) with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-
+- python3 -m spacy download en_core_web_sm
+  
 ### Getting Started with Dev Container
 
 1. **Clone the repository:**
@@ -46,7 +47,6 @@ The development container includes:
   - Markdown and Mermaid diagram support
   - Rainbow CSV for data files
   - Auto-docstring generator
-  - And more...
 
 - **Python Formatting:** Black formatter with format-on-save enabled
 - **Git LFS:** Pre-configured for large file support
