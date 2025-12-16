@@ -105,7 +105,32 @@ class ChatGpt:
         df = pd.DataFrame(json.loads(calc), columns=["category_x", "category_y", "similarity"])
         
         return df
+
+    def generate_cluster_name(self, terms: list[str]) -> str:
+        """
+        Generates a concise and descriptive name for a cluster of related terms.
+        Args:
+            terms (list of str): A list of terms that share a common theme or concept.
+        Returns:
+            str: A single-word or short-phrase name that best describes the common theme or concept among the provided terms.
+        """
         
+        
+        prompt_template =f"""
+        You are a helpful assistant that generates concise and descriptive names for clusters of related terms.
+        Given the following list of terms, provide a single-word or short-phrase name that best describes the common theme or concept among them.
+        Do not encapsulate the output in code blocks, bold or any markdown.
+        
+        Terms: {terms}
+        """
+    
+        response = self.chat(
+            instructions="You are a taxonomy and ontology expert. Provide concise and accurate responses based on the user's queries.",
+            input=prompt_template
+        )
+        
+        return response.strip()
+
 
     # get environment variables
     def _get_env_variables(self) -> None:
