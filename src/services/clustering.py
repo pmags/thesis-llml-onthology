@@ -10,7 +10,7 @@ def create_distance_matrix(
     pair1_column_name:str = "category_x",
     pair2_column_name:str = "category_y",
     similarity_column_name:str = "similarity",
-    max_similarity:int = 4) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+    max_similarity:int = 5) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     """
     Converts a similarity pair DataFrame into a distance matrix and its condensed form.
     This function calculates a distance matrix by subtracting the similarity values 
