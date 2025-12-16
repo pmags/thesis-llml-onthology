@@ -122,14 +122,42 @@ conda env export > environment.yml
 ```
 thesis-llml-onthology/
 ├── src/                  # Modules to be used during analysis
+│   ├── services/         # Service modules for clustering, ontology, and OpenAI integration
+│   │   ├── clustering.py
+│   │   ├── ontology.py
+│   │   ├── openai.py
+│   │   └── __init__.py
 ├── notebooks/            # Contains analysis notebooks
+│   ├── naive_approach_exp1.ipynb
+│   ├── naive_approach_exp2.ipynb
+│   ├── naive_approach_exp3.ipynb
+├── output/               # Stores generated outputs
 ├── tests/                # Contains test files
-├── .devcontainer/        # Dev container configuration
-│   ├── devcontainer.json # Container settings and VS Code extensions
-│   ├── Dockerfile        # Container image definition
-│   └── noop.txt          # Placeholder file for build process
 ├── environment.yml       # Conda environment specification
 └── README.md             # This file
+```
+
+## Environment Configuration
+
+### .env File
+
+A `.env` file is required to run the project. It should include the following variables:
+
+```
+# Example .env file
+IAEDU_API_KEY=<your_openai_api_key>
+OPENAI_API_KEY=<your_openai_api_key>
+OPENAI_API_KEY_SERVICEACCOUNT = <your_openai_api_key>
+```
+
+Ensure that the `.env` file is placed in the root directory of the project.
+
+### Additional Setup
+
+To ensure proper functionality, run the following command to download the required spaCy model:
+
+```bash
+python3 -m spacy download en_core_web_sm
 ```
 
 ## Working with Jupyter Notebooks
