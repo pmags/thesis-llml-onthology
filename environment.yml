@@ -32,6 +32,9 @@ dependencies:
   - python-graphviz
   - sqlite
   - libsqlite
+  - chromadb
+  - networkx
+  - python-louvain
   - pip: 
     - semantic-kernel
     - kglab
