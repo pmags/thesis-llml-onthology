@@ -99,3 +99,5 @@ class Ontology:
         graph = pydotplus.graph_from_dot_data(stream.getvalue())
         png_data = graph.create_png()
         display(Image(png_data))
+
+   
