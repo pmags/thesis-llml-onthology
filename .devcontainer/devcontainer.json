@@ -33,7 +33,8 @@
 				"ms-python.debugpy",
 				"ms-python.vscode-python-envs",
 				"njpwerner.autodocstring",
-				"GitHub.copilot"
+				"GitHub.copilot",
+				"ms-toolsai.datawrangler"
 			],
 			"settings": {
 				"[python]": {

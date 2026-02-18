@@ -5,6 +5,8 @@ from sklearn.cluster import AgglomerativeClustering
 from scipy.cluster.hierarchy import dendrogram, linkage
 from scipy.spatial.distance import squareform
 
+import networkx as nx
+
 def create_distance_matrix(
     similarity_pair: pd.DataFrame, 
     pair1_column_name:str = "category_x",
@@ -59,3 +61,41 @@ def create_distance_matrix(
     
     return terms, distance_matrix, condensed_dist
 
+def build_similarity_graph(terms_pair, threshold=5):
+    """_summary_
+
+    Args:
+        terms_pair (_type_): _description_
+        threshold (int, optional): _description_. Defaults to 5.
+
+    Returns:
+        _type_: _description_
+    """
+    
+    graph = nx.Graph()
+    
+    # Add all unique terms as nodes
+    all_terms = set(terms_pair['term_x'].unique()) | set(terms_pair['term_y'].unique())
+    print(f"All terms ({len(all_terms)}): {sorted(all_terms)}")
+    
+    for term in all_terms:
+        graph.add_node(term)
+    
+    # Add edges based on similarity threshold
+    for _, row in terms_pair.iterrows():
+        if row['similarity'] >= threshold:
+            graph.add_edge(
+                row['term_x'],
+                row['term_y'],
+                weight=float(row['similarity']),
+                distance=float(10 - row['similarity'])
+            )
+    
+    # Print selected edges
+    print(f"\nEdges added (threshold >= {threshold}):")
+    for u, v, data in graph.edges(data=True):
+        print(f"  {u} -- {v} (weight: {data['weight']:.2f})")
+    
+    print(f"\nSummary: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+    
+    return graph
