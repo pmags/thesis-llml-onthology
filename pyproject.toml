@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ontogen"
+version = "0.1.0"
+description = "LLM-driven ontology generation from domain descriptions"
+requires-python = ">=3.10"
+dependencies = [
+    "openai",
+    "rdflib",
+    "networkx",
+    "python-louvain",
+    "pandas",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "python-dotenv",
+    "pydotplus",
+]
+
+[project.optional-dependencies]
+app = ["gradio"]
+dev = ["pytest", "pytest-cov", "flake8"]
+notebooks = ["ipykernel", "ipywidgets", "matplotlib", "seaborn"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --tb=short"

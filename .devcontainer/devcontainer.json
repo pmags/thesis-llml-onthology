@@ -9,11 +9,11 @@
 			"AZURE_DEVOPS_PAT": "${localEnv:AZURE_DEVOPS_PAT}"
 		}
 	},
-	"features": {
-		"ghcr.io/devcontainers/features/python:1": {
-			"version": "latest"
-		}
-	},
+	// "features": {
+	// 	"ghcr.io/devcontainers/features/python:1": {
+	// 		"version": "latest"
+	// 	}
+	// },
 
 	"customizations": {
 		"vscode": {

@@ -1,194 +1,178 @@
-# Thesis LLML Ontology
+# LLM-Driven Ontology Generation
 
-This repository contains a development environment for working with Large Language Models (LLM) and ontology-related projects using Python.
+Automatically generate hierarchical RDF/OWL ontologies from a user-specified domain using Large Language Models (LLMs). This system employs a **Top-Down Skeleton + Bottom-Up Population** algorithm that infers semantic relationships (similarity and composition) via LLM prompts, producing properly structured taxonomies with classes, subclasses, and instances.
 
-## Development Environment
+**Example**: Given the domain "Star Trek", the system produces an ontology where `Species` (class) → `Vulcans` (subclass) → `Spock` (instance).
 
-This project uses a **Dev Container** with **Miniconda** to ensure a consistent development environment across different machines.
+## Installation
 
 ### Prerequisites
 
-- [Docker](https://www.docker.com/products/docker-desktop) installed on your machine
-- [Visual Studio Code](https://code.visualstudio.com/) with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-- python3 -m spacy download en_core_web_sm
-  
-### Getting Started with Dev Container
+- **Python ≥ 3.10**
+- **Conda** (recommended) or pip
+- **OpenAI API key** (set as `OPENAI_API_KEY` environment variable)
 
-1. **Clone the repository:**
+### Setup
+
+1. **Clone and navigate to the repository:**
    ```bash
    git clone <repository-url>
    cd thesis-llml-onthology
    ```
 
-2. **Open in VS Code:**
+2. **Create and activate the conda environment:**
    ```bash
-   code .
+   conda env create -f environment.yml
+   conda activate thesis_env
    ```
 
-3. **Reopen in Container:**
-   - When prompted, click "Reopen in Container"
-   - Or use the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and select "Dev Containers: Reopen in Container"
-
-4. **Wait for the container to build:**
-   - The first build may take several minutes as it downloads the base image and installs all dependencies
-   - Subsequent builds will be faster due to Docker's caching
-
-### Dev Container Features
-
-The development container includes:
-
-- **Base Image:** Microsoft's official Miniconda Dev Container (Debian-based)
-- **Python Environment:** Miniconda with Python 3
-- **Pre-installed VS Code Extensions:**
-  - Jupyter notebooks support
-  - Python language support (Pylance, Pylint)
-  - GitHub Copilot
-  - Semantic Kernel
-  - Markdown and Mermaid diagram support
-  - Rainbow CSV for data files
-  - Auto-docstring generator
-
-- **Python Formatting:** Black formatter with format-on-save enabled
-- **Git LFS:** Pre-configured for large file support
-
-## Conda Environment
-
-The project uses a Conda environment defined in `environment.yml` with the following key packages:
-
-### Core Libraries
-
-- **Data Science:** pandas, numpy, scipy, scikit-learn
-- **Visualization:** matplotlib, seaborn
-- **Development:** ipython, ipykernel, ipywidgets, pytest
-- **Database:** pyodbc
-- **Configuration:** python-dotenv, configparser
-- **Semantic Web:** rdflib (for ontology work)
-- **AI/ML:** semantic-kernel (Microsoft's Semantic Kernel)
-
-### Conda Channels
-
-The environment uses the following channels in priority order:
-1. `pytorch` - For PyTorch packages
-2. `nvidia` - For NVIDIA/CUDA related packages
-3. `conda-forge` - Community-maintained packages
-
-### Managing the Conda Environment
-
-#### Inside the Dev Container
-
-The environment is automatically created when the container is built. The base conda environment is updated with the packages from `environment.yml`.
-
-To activate the environment manually:
-```bash
-conda activate thesis_env
-```
-
-#### Outside the Dev Container (Local Development)
-
-If you prefer to work outside the container, you can create the environment locally:
-
-```bash
-# Create the environment
-conda env create -f environment.yml
-
-# Activate the environment
-conda activate thesis_env
-
-# Install Jupyter kernel (for notebook support)
-python -m ipykernel install --user --name thesis_env
-```
-
-#### Updating the Environment
-
-If you add new dependencies to `environment.yml`:
-
-1. **Inside the Dev Container:** Rebuild the container
-   - Command Palette → "Dev Containers: Rebuild Container"
-
-2. **Local Development:**
+3. **Install the package in development mode:**
    ```bash
-   conda env update -f environment.yml
+   pip install -e '.[dev,notebooks,app]'
    ```
 
-#### Exporting the Current Environment
+4. **Set your OpenAI API key:**
+   ```bash
+   export OPENAI_API_KEY=<your-api-key>
+   ```
 
-To export your current environment configuration:
-```bash
-conda env export > environment.yml
+## Quick Start
+
+Generate an ontology for a domain in a few lines of code:
+
+```python
+from ontogen import ChatGpt, Ontology
+
+# Initialize the LLM agent
+agent = ChatGpt()
+
+# Create and generate the ontology
+onto = Ontology(domain="Star Trek", agent=agent)
+onto.generate_ontology()
+```
+
+### Custom Ontology Schema
+
+The ontology structure is configurable via the `level_schema` parameter. Override the default 3-level hierarchy (class → subclass → instance) if needed:
+
+```python
+from ontogen import Ontology, OntologyLevel
+
+custom_levels = (
+    OntologyLevel(
+        name="category",
+        relation_to_parent="categorizedBy",
+        rdf_predicate="rdfs:subClassOf",
+        is_rdf_class=True,
+        expandable=True,
+        seed_key="categories",
+        children_key="items"
+    ),
+    # ... additional levels
+)
+
+onto = Ontology(domain="Star Trek", agent=agent, level_schema=custom_levels)
 ```
 
 ## Project Structure
 
 ```
-thesis-llml-onthology/
-├── src/                  # Modules to be used during analysis
-│   ├── services/         # Service modules for clustering, ontology, and OpenAI integration
-│   │   ├── clustering.py
-│   │   ├── ontology.py
-│   │   ├── openai.py
-│   │   └── __init__.py
-├── notebooks/            # Contains analysis notebooks
-│   ├── naive_approach_exp1.ipynb
-│   ├── naive_approach_exp2.ipynb
-│   ├── naive_approach_exp3.ipynb
-├── output/               # Stores generated outputs
-├── tests/                # Contains test files
-├── environment.yml       # Conda environment specification
-└── README.md             # This file
+src/ontogen/                 # Core package
+├── __init__.py              # Public API exports
+├── ontology.py              # Ontology class: seed, expand, build, serialize
+├── llm_client.py            # ChatGpt LLM wrapper
+└── clustering.py            # Graph building and analysis
+
+app/                         # Gradio web UI
+├── __init__.py
+└── main.py
+
+notebooks/
+├── ontogen_sandbox.ipynb    # Main demo & experimentation
+└── alternative_algo.ipynb   # Algorithm research
+
+tests/                       # Pytest test suite
+├── test_seed.py
+├── test_similarity.py
+├── test_validation.py
+├── test_expansion.py
+├── test_serialization.py
+└── test_e2e.py
+
+output/                      # Generated ontology files
+├── ontology.ttl            # RDF/Turtle serialization
+
+docs/
+└── algorithm.md            # Algorithm documentation
+
+environment.yml             # Conda environment spec
+pyproject.toml              # Package configuration
+README.md                   # This file
 ```
 
-## Environment Configuration
+## Algorithm Overview
 
-### .env File
+The generation process follows four phases:
 
-A `.env` file is required to run the project. It should include the following variables:
+1. **Structured Seed**: LLM generates a 3-level taxonomic skeleton (classes → subclasses → instances) as structured JSON.
+2. **Validation**: Pairwise LLM similarity evaluation (~3n calls) pruning weak structural edges.
+3. **Iterative Expansion**: UCB1 multi-armed bandit selects nodes to expand, generating new subclasses/instances with validation and cross-branch linking.
+4. **RDF Serialization**: The ontology is mapped to standard RDF predicates (`rdfs:Class`, `rdfs:subClassOf`, `rdf:type`) and serialized to Turtle format.
 
-```
-# Example .env file
-IAEDU_API_KEY=<your_openai_api_key>
-OPENAI_API_KEY=<your_openai_api_key>
-OPENAI_API_KEY_SERVICEACCOUNT = <your_openai_api_key>
-```
+For detailed algorithm documentation, see [docs/algorithm.md](docs/algorithm.md).
 
-Ensure that the `.env` file is placed in the root directory of the project.
+## Running Tests
 
-### Additional Setup
-
-To ensure proper functionality, run the following command to download the required spaCy model:
+Run the full test suite:
 
 ```bash
-python3 -m spacy download en_core_web_sm
+pytest tests/ -v
 ```
 
-## Working with Jupyter Notebooks
-
-The environment comes pre-configured for Jupyter notebook development:
-
-1. Create a new `.ipynb` file in VS Code
-2. Select the kernel: `thesis_env` or `base` (both have the same packages in this setup)
-3. Start coding!
-
-## Troubleshooting
-
-### Container fails to build
-
-- Ensure Docker is running
-- Check that you have sufficient disk space
-- Try rebuilding without cache: Command Palette → "Dev Containers: Rebuild Container Without Cache"
-
-### Python packages missing
-
-- Verify the package is listed in `environment.yml`
-- Rebuild the container to install new packages
-
-### Conda environment not activated
+With coverage report:
 
 ```bash
-conda activate thesis_env
+pytest tests/ --cov=ontogen -v
 ```
+
+## Web UI
+
+Launch the Gradio web interface:
+
+```bash
+python -m app.main
+```
+
+Or directly with Gradio:
+
+```bash
+gradio app/main.py
+```
+
+## Configuration
+
+Key parameters for `Ontology.__init__()`:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `domain` | `str` | Required | Domain for ontology generation (e.g., "Star Trek") |
+| `agent` | `ChatGpt` | Required | LLM client for prompts |
+| `level_schema` | `Tuple[OntologyLevel, ...]` | `DEFAULT_LEVEL_SCHEMA` | Customizable hierarchy levels |
+| `num_classes` | `int` | 5 | Number of top-level classes in seed |
+| `max_iterations` | `int` | 50 | Maximum expansion iterations |
+| `candidates_per_iteration` | `int` | 3 | Candidates generated per expansion step |
+| `similarity_threshold` | `float` | 0.5 | Acceptance threshold for candidates (0-1) |
+| `cross_link_threshold` | `float` | 0.7 | Cross-branch linking threshold (0-1) |
+| `exploration_constant` | `float` | 1.414 | UCB1 exploration parameter (√2) |
+| `output_dir` | `Path` | `output/` | Directory for serialized ontologies |
+| `namespace` | `str` | `http://example.org/ontology/` | RDF base namespace |
+
+## License
+
+This is a thesis project for research purposes.
 
 ## Additional Resources
 
-- [VS Code Dev Containers Documentation](https://code.visualstudio.com/docs/devcontainers/containers)
-- [Conda Documentation](https://docs.conda.io/)
-- [Miniconda Documentation](https://docs.conda.io/en/latest/miniconda.html)
+- **Algorithm Documentation**: [docs/algorithm.md](docs/algorithm.md)
+- **Main Notebook**: [notebooks/ontogen_sandbox.ipynb](notebooks/ontogen_sandbox.ipynb)
+- **W3C RDF Schema**: https://www.w3.org/TR/rdf-schema/

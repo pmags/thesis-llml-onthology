@@ -17,6 +17,7 @@ dependencies:
   - pyodbc
   - requests
   - pytest
+  - pytest-cov
   - configparser
   - matplotlib
   - flake8
@@ -35,6 +36,7 @@ dependencies:
   - chromadb
   - networkx
   - python-louvain
+  - gradio
   - pip: 
     - semantic-kernel
     - kglab
