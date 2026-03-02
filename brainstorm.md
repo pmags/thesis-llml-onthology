@@ -731,3 +731,22 @@ The LLM knows that Spock is a Vulcan and Vulcans are a Species. You just need to
 @builder build next task for feature algorithm_schema
 
 @reviewer review feature algorithm_schema
+
+
+Convergence Strategy
+The expansion loop in generate_ontology() has three termination conditions, checked in this priority order each iteration:
+
+1. No expandable nodes remain
+_select_node_ucb1() returns None when every node in the graph is at a leaf level (i.e., expandable=False in the level schema — by default, only instance nodes are non-expandable). This means all classes and subclasses have been visited, and the only things left are instances which can't produce children.
+
+2. Plateau early-stop (the convergence signal)
+The reward (mean similarity of accepted candidates, 0–1) is tracked iteration-to-iteration. If the absolute delta between consecutive rewards is < 0.01, a plateau_count increments. If it changes by ≥ 0.01, the counter resets to 0.
+
+Early termination fires when both conditions are true:
+
+plateau_count >= 3 (reward stagnated for 3+ consecutive iterations)
+All non-instance nodes have n_visits >= 1 (every class/subclass has been expanded at least once)
+This is the "convergence" detector — the ontology has stopped learning meaningful new structure.
+
+3. max_iterations exhausted
+The hard ceiling. The loop runs range(max_iterations) times at most.

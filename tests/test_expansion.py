@@ -12,7 +12,7 @@ Tests cover:
 import json
 import pytest
 import networkx as nx
-from unittest.mock import MagicMock, patch
+from unittest.mock import create_autospec, patch
 
 from ontogen import Ontology, OntologyLevel, DEFAULT_LEVEL_SCHEMA
 
@@ -590,6 +590,83 @@ class TestGenerateOntology:
         create_idx = call_order.index("create")
         assert seed_idx < create_idx
 
+    def test_generate_ontology_populates_history(self, mock_agent_with_seed_response):
+        """Verify generate_ontology() populates self.history with audit data.
+
+        Checks that:
+        - self.history is a GenerationHistory instance after running
+        - Phase records are populated with timing data
+        - Expansion records capture iteration metrics
+        - Summary statistics are filled in
+        - to_dataframe() returns a valid DataFrame
+        - summary() returns a non-empty string
+        """
+        from ontogen.ontology import GenerationHistory
+
+        ontology = Ontology(
+            domain="Star Trek",
+            agent=mock_agent_with_seed_response,
+            max_iterations=2,
+        )
+
+        # Mock expand to run 2 iterations then terminate
+        call_count = [0]
+
+        def mock_expand():
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                return {
+                    "node": f"Node_{call_count[0]}",
+                    "candidates_generated": 5,
+                    "candidates_accepted": 3,
+                    "reward": 0.6 + call_count[0] * 0.05,
+                }
+            return {
+                "node": None,
+                "candidates_generated": 0,
+                "candidates_accepted": 0,
+                "reward": 0.0,
+            }
+
+        with patch.object(ontology, "expand_ontology", side_effect=mock_expand):
+            with patch.object(ontology, "build_ontology"):
+                with patch.object(ontology, "serialize_ontology", return_value="# TTL"):
+                    ontology.generate_ontology()
+
+        # History must be set
+        assert ontology.history is not None
+        assert isinstance(ontology.history, GenerationHistory)
+
+        # Domain and timestamps
+        assert ontology.history.domain == "Star Trek"
+        assert ontology.history.started_at is not None
+        assert ontology.history.completed_at is not None
+
+        # Config snapshot
+        assert "max_iterations" in ontology.history.config
+        assert ontology.history.config["max_iterations"] == 2
+
+        # Phase records
+        assert len(ontology.history.phases) >= 4  # seed, graph, validation, expansion, rdf, file
+
+        # Expansion records
+        assert len(ontology.history.expansion_records) >= 2
+
+        for rec in ontology.history.expansion_records:
+            assert rec.iteration > 0
+            assert rec.elapsed_seconds >= 0
+
+        # DataFrame conversion
+        df = ontology.history.to_dataframe()
+        assert len(df) == len(ontology.history.expansion_records)
+        assert "reward" in df.columns
+        assert "cumulative_nodes" in df.columns
+
+        # Summary string
+        summary_text = ontology.history.summary()
+        assert "Star Trek" in summary_text
+        assert "Ontology Generation Summary" in summary_text
+
 
 # ============================================================================
 # Integration Tests: Complete Workflow
@@ -669,3 +746,195 @@ class TestExpansionIntegration:
         
         assert selected_low is not None
         assert selected_high is not None
+
+
+# ============================================================================
+# Convergence Tests
+# ============================================================================
+
+
+class TestConvergence:
+    """Tests for expansion loop convergence / early termination logic."""
+
+    def test_stagnation_triggers_early_stop(self, mock_agent_with_seed_response):
+        """Verify that 5 consecutive no-growth iterations trigger early termination.
+
+        Scenario:
+        - max_iterations=10
+        - expand_ontology always returns 0 accepted candidates
+        - Graph never grows → stagnation_count increments each iteration
+        - Should stop at iteration 5 (STAGNATION_LIMIT) instead of 10
+        """
+        ontology = Ontology(
+            domain="Star Trek",
+            agent=mock_agent_with_seed_response,
+            max_iterations=10,
+        )
+
+        def mock_expand():
+            return {
+                "node": "SomeNode",
+                "candidates_generated": 20,
+                "candidates_accepted": 0,
+                "reward": 0.0,
+            }
+
+        with patch.object(ontology, "expand_ontology", side_effect=mock_expand):
+            with patch.object(ontology, "build_ontology"):
+                with patch.object(ontology, "serialize_ontology", return_value="# TTL"):
+                    ontology.generate_ontology()
+
+        assert ontology.history is not None
+        assert ontology.history.total_iterations == 5
+        assert ontology.history.early_terminated is True
+        assert "stagnant" in ontology.history.termination_reason
+
+    def test_plateau_skips_zero_acceptance_iterations(self, mock_agent_with_seed_response):
+        """Verify that zero-acceptance iterations do NOT reset the plateau counter.
+
+        Scenario — reproduces the original bug:
+        - Iterations alternate: reward=0.85 (accepted), reward=0.0 (zero accepted)
+        - Old logic: 0.85→0.0 = delta 0.85 → resets plateau (BUG)
+        - New logic: 0.0 iteration skipped → plateau only compares 0.85 vs 0.85
+        """
+        ontology = Ontology(
+            domain="Star Trek",
+            agent=mock_agent_with_seed_response,
+            max_iterations=20,
+        )
+
+        call_count = [0]
+
+        # Wrap create_seed_ontology to mark all seed nodes as visited afterward,
+        # so the "all seed nodes visited" plateau condition can be satisfied.
+        original_create = ontology.create_seed_ontology
+
+        def create_and_mark_visited():
+            original_create()
+            for node in ontology.ontology_graph.nodes():
+                if ontology.ontology_graph.nodes[node].get("level") != "instance":
+                    ontology.ontology_graph.nodes[node]["n_visits"] = 1
+
+        def mock_expand():
+            call_count[0] += 1
+            if call_count[0] % 2 == 1:
+                # Odd iterations: accept 1 candidate, reward=0.85
+                # Add a node so stagnation doesn't trigger first
+                node_id = f"new_node_{call_count[0]}"
+                ontology.ontology_graph.add_node(
+                    node_id, term=node_id, level="instance", n_visits=0, total_reward=0.0
+                )
+                return {
+                    "node": f"Parent_{call_count[0]}",
+                    "candidates_generated": 20,
+                    "candidates_accepted": 1,
+                    "reward": 0.85,
+                }
+            else:
+                # Even iterations: zero accepted
+                return {
+                    "node": f"Parent_{call_count[0]}",
+                    "candidates_generated": 20,
+                    "candidates_accepted": 0,
+                    "reward": 0.0,
+                }
+
+        with patch.object(ontology, "create_seed_ontology", side_effect=create_and_mark_visited):
+            with patch.object(ontology, "expand_ontology", side_effect=mock_expand):
+                with patch.object(ontology, "build_ontology"):
+                    with patch.object(ontology, "serialize_ontology", return_value="# TTL"):
+                        ontology.generate_ontology()
+
+        # With the fix, plateau should compare 0.85 vs 0.85 across productive
+        # iterations and converge. It should NOT run all 20 iterations.
+        assert ontology.history is not None
+        assert ontology.history.total_iterations < 20
+        assert ontology.history.early_terminated is True
+
+    def test_plateau_resets_when_reward_changes(self, mock_agent_with_seed_response):
+        """Verify that a genuine reward change resets the plateau counter."""
+        ontology = Ontology(
+            domain="Star Trek",
+            agent=mock_agent_with_seed_response,
+            max_iterations=10,
+        )
+
+        rewards = [0.85, 0.85, 0.85, 0.50, 0.50, 0.50, 0.50, 0.50, 0.50, 0.50]
+        call_count = [0]
+
+        def mock_expand():
+            call_count[0] += 1
+            idx = min(call_count[0] - 1, len(rewards) - 1)
+            # Add a node each time to prevent stagnation termination
+            node_id = f"new_node_{call_count[0]}"
+            ontology.ontology_graph.add_node(
+                node_id, term=node_id, level="instance", n_visits=0, total_reward=0.0
+            )
+            return {
+                "node": f"Parent_{call_count[0]}",
+                "candidates_generated": 20,
+                "candidates_accepted": 5,
+                "reward": rewards[idx],
+            }
+
+        with patch.object(ontology, "expand_ontology", side_effect=mock_expand):
+            with patch.object(ontology, "build_ontology"):
+                with patch.object(ontology, "serialize_ontology", return_value="# TTL"):
+                    ontology.generate_ontology()
+
+        # Reward changes from 0.85 to 0.50 at iteration 4, resetting plateau.
+        # Then 0.50 repeats from iter 4 onward → plateau should trigger.
+        assert ontology.history is not None
+        # The plateau should have been reached, just not at iteration 3
+        records = ontology.history.expansion_records
+        # Iteration 3 (0.85, 0.85, 0.85) → plateau(2) but only 2, not 3 yet
+        # Iteration 4 (0.50) → plateau resets to 0
+        # Iterations 5-7 (0.50, 0.50, 0.50) → plateau(3) → should converge
+        assert records[2].plateau_count == 2  # iter 3: consecutive 0.85 (2nd consecutive)
+        assert records[3].plateau_count == 0  # iter 4: reward changed to 0.50
+
+    def test_stagnation_count_in_expansion_record(self, mock_agent_with_seed_response):
+        """Verify stagnation_count is properly recorded in ExpansionRecord."""
+        ontology = Ontology(
+            domain="Star Trek",
+            agent=mock_agent_with_seed_response,
+            max_iterations=6,
+        )
+
+        call_count = [0]
+
+        def mock_expand():
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                # First 2 iterations: add nodes (graph grows)
+                node_id = f"new_{call_count[0]}"
+                ontology.ontology_graph.add_node(
+                    node_id, term=node_id, level="instance", n_visits=0, total_reward=0.0
+                )
+                return {
+                    "node": f"P_{call_count[0]}",
+                    "candidates_generated": 10,
+                    "candidates_accepted": 2,
+                    "reward": 0.7,
+                }
+            else:
+                # Remaining iterations: no growth
+                return {
+                    "node": f"P_{call_count[0]}",
+                    "candidates_generated": 10,
+                    "candidates_accepted": 0,
+                    "reward": 0.0,
+                }
+
+        with patch.object(ontology, "expand_ontology", side_effect=mock_expand):
+            with patch.object(ontology, "build_ontology"):
+                with patch.object(ontology, "serialize_ontology", return_value="# TTL"):
+                    ontology.generate_ontology()
+
+        records = ontology.history.expansion_records
+        # First 2 iterations: graph grew → stagnation_count = 0
+        assert records[0].stagnation_count == 0
+        assert records[1].stagnation_count == 0
+        # Iterations 3-7: no growth → stagnation increments each time
+        for i in range(2, len(records)):
+            assert records[i].stagnation_count == i - 1  # 1, 2, 3, 4, 5

@@ -105,7 +105,7 @@ class TestSimilarityCache:
         assert len(ontology_with_cache.similarity_cache) == 0
 
         # Setup: Configure mock to return a value on first call
-        mock_agent.get_similarity.return_value = {"similarity": 72}
+        mock_agent.get_similarity_with_descriptions.return_value = {"similarity": 72}
         ontology_with_cache.agent = mock_agent
 
         # Call 1: First call should hit LLM (cache miss)
@@ -114,7 +114,7 @@ class TestSimilarityCache:
         # Assert: Returns the LLM result
         assert result_1 == 72
         # Assert: LLM was called once
-        mock_agent.get_similarity.assert_called_once()
+        mock_agent.get_similarity_with_descriptions.assert_called_once()
         # Assert: Result is now in cache
         cache_key = tuple(sorted(["Species", "Vulcans"]))
         assert cache_key in ontology_with_cache.similarity_cache
@@ -122,7 +122,7 @@ class TestSimilarityCache:
 
         # Reset mock call count
         mock_agent.reset_mock()
-        mock_agent.get_similarity.side_effect = RuntimeError("Should not call LLM on second lookup!")
+        mock_agent.get_similarity_with_descriptions.side_effect = RuntimeError("Should not call LLM on second lookup!")
 
         # Call 2: Second call with reversed order should hit cache
         result_2 = ontology_with_cache._get_similarity_cached("Vulcans", "Species")
@@ -130,7 +130,7 @@ class TestSimilarityCache:
         # Assert: Returns same cached value
         assert result_2 == 72
         # Assert: LLM was not called (cache hit)
-        mock_agent.get_similarity.assert_not_called()
+        mock_agent.get_similarity_with_descriptions.assert_not_called()
 
     def test_cache_with_descriptions_uses_correct_method(self, ontology_with_cache, mock_agent):
         """Verify that _get_similarity_cached uses get_similarity_with_descriptions when descriptions provided.
@@ -185,7 +185,7 @@ class TestSimilarityCache:
         This tests error handling for malformed LLM responses.
         """
         # Setup: Mock returns None similarity
-        mock_agent.get_similarity.return_value = {"similarity": None}
+        mock_agent.get_similarity_with_descriptions.return_value = {"similarity": None}
         ontology_with_cache.agent = mock_agent
 
         # Call

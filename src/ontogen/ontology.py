@@ -11,8 +11,11 @@ import itertools
 import json
 import logging
 import math
+import os
 import re
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple, Any
 
 import pandas as pd
@@ -88,6 +91,155 @@ DEFAULT_LEVEL_SCHEMA: List[OntologyLevel] = [
 ]
 
 
+@dataclass
+class ExpansionRecord:
+    """Metrics captured for a single expansion iteration.
+
+    Tracks what happened during one UCB1-guided expansion step, including
+    which node was expanded, how many candidates were generated/accepted,
+    the reward signal, and the cumulative graph state at that point.
+
+    Attributes:
+        iteration: 1-based iteration number.
+        node_expanded: The node ID selected for expansion, or None if none available.
+        candidates_generated: Number of candidate terms returned by the LLM.
+        candidates_accepted: Number of candidates passing the similarity threshold.
+        reward: Mean similarity of accepted candidates (0–1 scale).
+        cumulative_nodes: Total graph nodes after this iteration.
+        cumulative_edges: Total graph edges after this iteration.
+        acceptance_rate: Fraction of generated candidates that were accepted (0–1).
+        plateau_count: Current consecutive plateau counter at this iteration.
+        stagnation_count: Consecutive iterations where graph node count did not grow.
+        elapsed_seconds: Wall-clock seconds since the pipeline started.
+    """
+
+    iteration: int
+    node_expanded: Optional[str]
+    candidates_generated: int
+    candidates_accepted: int
+    reward: float
+    cumulative_nodes: int
+    cumulative_edges: int
+    acceptance_rate: float
+    plateau_count: int
+    stagnation_count: int
+    elapsed_seconds: float
+
+
+@dataclass
+class PhaseRecord:
+    """Timing and summary for a single pipeline phase.
+
+    Attributes:
+        phase: 1-based phase number.
+        name: Human-readable phase name (e.g., "Seed generation").
+        duration_seconds: Wall-clock duration of this phase.
+        details: Arbitrary key-value details about what happened in the phase.
+    """
+
+    phase: int
+    name: str
+    duration_seconds: float
+    details: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class GenerationHistory:
+    """Complete audit trail of an ontology generation run.
+
+    Stores configuration, per-phase timing, per-iteration expansion metrics,
+    and final summary statistics. Designed for post-hoc analysis, convergence
+    plotting, and reproducibility auditing.
+
+    Attributes:
+        domain: The domain that was used for generation.
+        started_at: ISO 8601 timestamp when the pipeline started.
+        completed_at: ISO 8601 timestamp when the pipeline finished (None if still running).
+        config: Snapshot of generation parameters (thresholds, max_iterations, etc.).
+        phases: Ordered list of phase records with timing.
+        expansion_records: Ordered list of per-iteration expansion metrics.
+        total_iterations: Number of expansion iterations that ran.
+        final_nodes: Final node count in the ontology graph.
+        final_edges: Final edge count in the ontology graph.
+        final_triples: Number of RDF triples in the serialized output.
+        early_terminated: Whether the expansion loop stopped before max_iterations.
+        termination_reason: Human-readable reason for termination.
+    """
+
+    domain: str
+    started_at: str
+    completed_at: Optional[str] = None
+    config: Dict[str, Any] = field(default_factory=dict)
+    phases: List[PhaseRecord] = field(default_factory=list)
+    expansion_records: List[ExpansionRecord] = field(default_factory=list)
+    total_iterations: int = 0
+    final_nodes: int = 0
+    final_edges: int = 0
+    final_triples: int = 0
+    early_terminated: bool = False
+    termination_reason: str = ""
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """Convert expansion records to a pandas DataFrame for tabular analysis.
+
+        Returns:
+            DataFrame with one row per expansion iteration, columns matching
+            ExpansionRecord fields.
+        """
+        if not self.expansion_records:
+            return pd.DataFrame()
+        from dataclasses import asdict
+
+        return pd.DataFrame([asdict(r) for r in self.expansion_records])
+
+    def summary(self) -> str:
+        """Return a human-readable summary of the generation run.
+
+        Returns:
+            Multi-line string summarizing domain, timing, iterations,
+            graph size, and termination status.
+        """
+        lines = [
+            f"{'=' * 60}",
+            f"  Ontology Generation Summary",
+            f"{'=' * 60}",
+            f"  Domain:            {self.domain}",
+            f"  Started:           {self.started_at}",
+            f"  Completed:         {self.completed_at or 'N/A'}",
+            f"  Iterations:        {self.total_iterations}",
+            f"  Final nodes:       {self.final_nodes}",
+            f"  Final edges:       {self.final_edges}",
+            f"  RDF triples:       {self.final_triples}",
+            f"  Early terminated:  {self.early_terminated}",
+        ]
+        if self.termination_reason:
+            lines.append(f"  Reason:            {self.termination_reason}")
+
+        # Phase timing breakdown
+        if self.phases:
+            lines.append(f"{'─' * 60}")
+            lines.append("  Phase Timing:")
+            for phase in self.phases:
+                lines.append(f"    {phase.phase}. {phase.name:<30s} {phase.duration_seconds:>7.1f}s")
+
+        # Expansion summary statistics
+        if self.expansion_records:
+            rewards = [r.reward for r in self.expansion_records]
+            accepted = [r.candidates_accepted for r in self.expansion_records]
+            generated = [r.candidates_generated for r in self.expansion_records]
+            lines.append(f"{'─' * 60}")
+            lines.append("  Expansion Stats:")
+            lines.append(f"    Avg reward:        {sum(rewards) / len(rewards):.3f}")
+            lines.append(f"    Total generated:   {sum(generated)}")
+            lines.append(f"    Total accepted:    {sum(accepted)}")
+            total_gen = sum(generated)
+            overall_rate = sum(accepted) / total_gen if total_gen > 0 else 0
+            lines.append(f"    Overall accept %:  {overall_rate:.1%}")
+
+        lines.append(f"{'=' * 60}")
+        return "\n".join(lines)
+
+
 class Ontology:
     """
     Orchestrates ontology generation from a domain using LLM-driven expansion.
@@ -147,6 +299,9 @@ class Ontology:
         self.rdf = Graph()
         self.turtle: Optional[str] = None
         self.base_namespace = Namespace("http://example.org/ontology/")
+
+        # Generation history — populated by generate_ontology()
+        self.history: Optional[GenerationHistory] = None
 
     def _get_level(self, name: str) -> OntologyLevel:
         """Retrieve a level definition by name.
@@ -235,18 +390,14 @@ class Ontology:
             logger.debug(f"Cache hit: similarity({term_a}, {term_b}) = {cached_score}")
             return cached_score
 
-        # Step 3: Cache miss — choose LLM method
-        if description_a is not None or description_b is not None:
-            logger.info(f"Cache miss: evaluating similarity({term_a}, {term_b}) with descriptions")
-            response = self.agent.get_similarity_with_descriptions(
-                term_a=term_a,
-                description_a=description_a,
-                term_b=term_b,
-                description_b=description_b,
-            )
-        else:
-            logger.info(f"Cache miss: evaluating similarity({term_a}, {term_b})")
-            response = self.agent.get_similarity(term_a, term_b)
+        # Step 3: Cache miss — evaluate similarity
+        logger.info(f"Cache miss: evaluating similarity({term_a}, {term_b})")
+        response = self.agent.get_similarity_with_descriptions(
+            term_x=term_a,
+            description_x=description_a,
+            term_y=term_b,
+            description_y=description_b,
+        )
 
         # Step 4: Parse response defensively
         score = response.get("similarity", 0.0)
@@ -324,9 +475,7 @@ TASK:
 Generate a structured taxonomy with {len(self.level_schema)} levels:
 {hierarchy_description}
 
-Generate exactly {num_classes} top-level {self.level_schema[0].name.lower()}s. 
-For each {self.level_schema[0].name.lower()}, include 2-4 {self.level_schema[1].name.lower()}s.
-For each {self.level_schema[1].name.lower()}, include 2-3 {self.level_schema[2].name.lower()}s (if applicable).
+{self._build_count_instructions(num_classes)}
 
 EXPECTED JSON STRUCTURE:
 {example_schema}
@@ -382,62 +531,82 @@ START YOUR RESPONSE WITH {{ CHARACTER. OUTPUT ONLY VALID JSON."""
             )
             return None
 
+    def _build_count_instructions(self, num_classes: int) -> str:
+        """Build count instruction lines for the seed prompt, safe for any schema depth.
+
+        Dynamically generates instructions like:
+        - "Generate exactly 5 top-level classs."
+        - "For each class, include 2-4 subclasss."
+        - "For each subclass, include 2-3 instances (if applicable)."
+
+        Args:
+            num_classes: Number of top-level entries to generate.
+
+        Returns:
+            A multi-line string with generation count instructions.
+        """
+        lines = [f"Generate exactly {num_classes} top-level {self.level_schema[0].name.lower()}s."]
+        counts = [(2, 4), (2, 3), (1, 3)]  # Default child count ranges per level depth
+        for i in range(len(self.level_schema) - 1):
+            parent_name = self.level_schema[i].name.lower()
+            child_name = self.level_schema[i + 1].name.lower()
+            lo, hi = counts[min(i, len(counts) - 1)]
+            suffix = " (if applicable)" if i > 0 else ""
+            lines.append(f"For each {parent_name}, include {lo}-{hi} {child_name}s{suffix}.")
+        return "\n".join(lines)
+
     def _build_example_schema(self) -> str:
         """Build a JSON schema example string from self.level_schema.
         
         Dynamically generates a nested example structure that matches the
-        expected format for the LLM to return.
+        expected format for the LLM to return. Programmatically builds a nested
+        dict and serializes it using json.dumps() to ensure valid JSON for any
+        schema depth.
         
         Returns:
             A formatted JSON string showing the expected structure.
         """
-        # Build the innermost (deepest) level first
-        example_lines = []
-        example_lines.append("{")
-        example_lines.append(f'  "domain": "{self.domain}",')
-        example_lines.append(f'  "taxonomy": [')
-
-        # Build nested structure for the first (top-level) category
+        # Start with domain and empty taxonomy
+        result = {
+            "domain": self.domain,
+            "taxonomy": []
+        }
+        
+        # Build one example row in the taxonomy
         root_level = self.level_schema[0]
-        example_lines.append(f'    {{')
-        example_lines.append(f'      "{root_level.seed_key}": "Example {root_level.name.capitalize()}",')
-        example_lines.append(f'      "description": "Brief description",')
-
-        # Now nest the children levels
-        indent = "      "
+        current = {
+            root_level.seed_key: f"Example {root_level.name.capitalize()}",
+            "description": "Brief description"
+        }
+        
+        # Iterate through remaining levels, nesting them
+        # We maintain a reference to the innermost item to add children to
+        innermost = current
         for level_idx in range(1, len(self.level_schema)):
             level = self.level_schema[level_idx]
             parent_level = self.level_schema[level_idx - 1]
             
-            if level.children_key is not None:
-                example_lines.append(f'{indent}"{parent_level.children_key}": [')
-                example_lines.append(f'{indent}  {{')
-                indent += "  "
-                example_lines.append(f'{indent}"{level.seed_key}": "Example {level.name.capitalize()}",')
-                example_lines.append(f'{indent}"description": "Brief description"')
+            # Add children key if parent has children
+            if parent_level.children_key is not None:
+                child_item = {
+                    level.seed_key: f"Example {level.name.capitalize()}",
+                    "description": "Brief description"
+                }
                 
-                # Check if this level has children
+                # Check if this child level has its own children
                 if level.children_key is not None:
-                    example_lines.append(f'{indent}"{level.children_key}": [')
-                    example_lines.append(f'{indent}  {{"term": "Example instance", "description": "..."}},')
-                    example_lines.append(f'{indent}  {{"term": "Another instance", "description": "..."}}')
-                    example_lines.append(f'{indent}]')
-            else:
-                # Leaf level (no children_key)
-                example_lines.append(f'{indent}"{level.seed_key}": "Example {level.name.capitalize()}",')
-                example_lines.append(f'{indent}"description": "Brief description"')
+                    # Add example children
+                    child_item[level.children_key] = [
+                        {"term": "Example instance", "description": "..."},
+                        {"term": "Another instance", "description": "..."}
+                    ]
+                
+                innermost[parent_level.children_key] = [child_item]
+                innermost = child_item
         
-        # Close all brackets
-        example_lines.append(f'{indent}')
-        example_lines.append(f'{indent[:-4]}}},')  # Remove 2 spaces from indent
-        example_lines.append(f'    ]')
-        indent = indent[:-4]  # Remove "  "
-        if indent:
-            example_lines.append(f'{indent}}}')
-        example_lines.append('  ]')
-        example_lines.append('}')
-
-        return "\n".join(example_lines)
+        result["taxonomy"].append(current)
+        
+        return json.dumps(result, indent=2)
 
     def create_seed_ontology(self) -> None:
         """Create the initial ontology skeleton from the structured seed.
@@ -671,9 +840,10 @@ START YOUR RESPONSE WITH {{ CHARACTER. OUTPUT ONLY VALID JSON."""
 
         # Step 2: Evaluate pairs and apply pruning rules
         # Thresholds (as percentages, 0-100 scale matching LLM output)
-        parent_child_threshold = 50.0
-        sibling_threshold = 30.0
-        cross_branch_threshold = 70.0
+        # similarity_threshold is already on the 0-100 scale
+        parent_child_threshold = self.similarity_threshold
+        sibling_threshold = self.similarity_threshold * 0.6
+        cross_branch_threshold = self.similarity_threshold * 1.4
 
         for pair in pairs:
             # Evaluate similarity via cached lookup
@@ -891,7 +1061,10 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
 
         # Step 6: Call LLM
         try:
-            response = self.agent.chat(prompt)
+            response = self.agent.chat(
+                instructions="You are an ontology engineer specialist. Generate accurate, specific taxonomies for the given domain based on the requested hierarchy.",
+                input=prompt
+            )
         except Exception as e:
             logger.error(f"LLM call failed for node '{node}': {e}")
             return []
@@ -910,7 +1083,6 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
                 candidates_raw = json.loads(response_text)
             except json.JSONDecodeError:
                 # Try to extract JSON array if there's extra text
-                import re
                 json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
                 if json_match:
                     candidates_raw = json.loads(json_match.group(0))
@@ -960,7 +1132,7 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         1. Read parent node's term and description from graph attributes
         2. For each candidate:
            - Call _get_similarity_cached() between parent and candidate
-           - Compare similarity to threshold (similarity_threshold * 100)
+           - Compare similarity to threshold (similarity_threshold, 0-100 scale)
            - Accept if >= threshold, reject and log if below
         3. Return list of accepted candidates
 
@@ -980,7 +1152,8 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         parent_description = parent_attrs.get("description", "")
 
         accepted = []
-        threshold = self.similarity_threshold * 100.0
+        # similarity_threshold is already on the 0-100 scale
+        threshold = self.similarity_threshold
 
         logger.info(
             f"Validating {len(candidates)} candidates for parent '{parent_term}' "
@@ -1451,19 +1624,29 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         return result
 
     def generate_ontology(self) -> Graph:
-        """Run the full ontology generation pipeline.
+        """Run the full ontology generation pipeline with progress tracking.
 
         This is the main entry point for users. It orchestrates the complete
         pipeline:
         1. Seed generation: LLM-generated structured 3-level taxonomy
-        2. Structural validation: Pairwise similarity pruning of weak edges
-        3. Iterative expansion: UCB1-guided bottom-up population of ontology
-        4. RDF serialization: Convert DiGraph to RDF/OWL triples
-        5. Turtle output: Write serialized ontology to file
+        2. Seed-to-DiGraph conversion
+        3. Structural validation: Pairwise similarity pruning of weak edges
+        4. Iterative expansion: UCB1-guided bottom-up population of ontology
+        5. RDF serialization: Convert DiGraph to RDF/OWL triples
+        6. Turtle output: Write serialized ontology to file
 
-        The expansion loop uses early termination: if reward plateaus (3 consecutive
-        iterations with < 0.01 delta) AND all non-leaf nodes have been visited at
-        least once, the loop terminates early.
+        The expansion loop uses early termination via two independent signals:
+
+        - **Reward plateau**: When reward (from iterations that accepted ≥1 candidate)
+          stays within delta < 0.01 for 3+ consecutive productive iterations, AND
+          all non-instance nodes that existed before expansion have been visited.
+        - **Growth stagnation**: When the graph node count has not increased for
+          5+ consecutive iterations (the LLM cannot find new valid candidates).
+
+        Progress is printed to stdout during execution. After completion, the full
+        generation history is available via ``self.history`` (a GenerationHistory
+        instance) for auditing, tabular analysis (``self.history.to_dataframe()``),
+        and convergence plotting (``self.plot_convergence()``).
 
         Returns:
             rdflib.Graph: The RDF graph representing the final ontology.
@@ -1473,35 +1656,117 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         """
         import pathlib
 
-        # Phase 1: Seed generation
+        pipeline_start = time.monotonic()
+
+        # Initialize history object for this run
+        self.history = GenerationHistory(
+            domain=self.domain,
+            started_at=datetime.now(timezone.utc).isoformat(),
+            config={
+                "exploration_constant": self.exploration_constant,
+                "max_iterations": self.max_iterations,
+                "similarity_threshold": self.similarity_threshold,
+                "confidence_threshold": self.confidence_threshold,
+                "candidates_per_iteration": self.candidates_per_iteration,
+                "cross_link_threshold": self.cross_link_threshold,
+                "level_schema": [level.name for level in self.level_schema],
+            },
+        )
+
+        # ── Helper: print a progress banner ──────────────────────────
+        def _print_phase(phase_num: int, name: str) -> None:
+            """Print a formatted phase header to stdout."""
+            print(f"\n{'━' * 60}")
+            print(f"  Phase {phase_num}: {name}")
+            print(f"{'━' * 60}")
+
+        # ── Phase 1: Seed generation ─────────────────────────────────
+        _print_phase(1, "Seed Generation")
+        phase_start = time.monotonic()
         logger.info(f"Phase 1: Generating seed from domain '{self.domain}'")
+
         seed = self.generate_initial_terms()
         if seed is None:
             raise ValueError("Seed generation failed: LLM returned None or invalid structure")
-        
-        self.seed = seed
-        logger.info(f"Seed generated successfully: {len(seed)} top-level classes")
 
-        # Phase 2: Seed-to-DiGraph conversion
+        num_top_classes = len(seed["taxonomy"])
+        phase_duration = time.monotonic() - phase_start
+        self.history.phases.append(PhaseRecord(
+            phase=1, name="Seed generation", duration_seconds=phase_duration,
+            details={"top_level_classes": num_top_classes},
+        ))
+        logger.info(f"Seed generated: {num_top_classes} top-level classes")
+        print(f"  ✓ Generated {num_top_classes} top-level classes ({phase_duration:.1f}s)")
+
+        # ── Phase 2: Seed → DiGraph ──────────────────────────────────
+        _print_phase(2, "Graph Construction")
+        phase_start = time.monotonic()
         logger.info("Phase 2: Converting seed to ontology graph")
+
         self.create_seed_ontology()
         num_nodes = self.ontology_graph.number_of_nodes()
         num_edges = self.ontology_graph.number_of_edges()
+        phase_duration = time.monotonic() - phase_start
+        self.history.phases.append(PhaseRecord(
+            phase=2, name="Graph construction", duration_seconds=phase_duration,
+            details={"nodes": num_nodes, "edges": num_edges},
+        ))
         logger.info(f"Ontology graph created: {num_nodes} nodes, {num_edges} edges")
+        print(f"  ✓ Created graph: {num_nodes} nodes, {num_edges} edges ({phase_duration:.1f}s)")
 
-        # Phase 3: Structural validation and pruning
+        # ── Phase 3: Structural validation ────────────────────────────
+        _print_phase(3, "Structural Validation")
+        phase_start = time.monotonic()
         logger.info("Phase 3: Validating structure and pruning weak edges")
+
         validation_summary = self.validate_structure()
+        phase_duration = time.monotonic() - phase_start
+        self.history.phases.append(PhaseRecord(
+            phase=3, name="Structural validation", duration_seconds=phase_duration,
+            details=validation_summary,
+        ))
         logger.info(
             f"Validation complete: {validation_summary['edges_pruned']} edges pruned, "
             f"{validation_summary['orphaned_nodes']} orphaned nodes"
         )
+        print(
+            f"  ✓ Pruned {validation_summary['edges_pruned']} edges, "
+            f"{validation_summary['orphaned_nodes']} orphaned nodes ({phase_duration:.1f}s)"
+        )
 
-        # Phase 4: UCB1-guided iterative expansion
+        # ── Phase 4: UCB1 expansion loop ─────────────────────────────
+        _print_phase(4, "UCB1 Iterative Expansion")
+        phase_start = time.monotonic()
         logger.info("Phase 4: Running expansion loop with UCB1 selection")
-        reward_history = []
+
+        # Print expansion table header
+        print(f"\n  {'Iter':>4s}  {'Node':<20s}  {'Gen':>4s}  {'Acc':>4s}  "
+              f"{'Rate':>6s}  {'Reward':>7s}  {'Nodes':>5s}  {'Edges':>5s}  {'Status'}")
+        print(f"  {'─' * 4}  {'─' * 20}  {'─' * 4}  {'─' * 4}  "
+              f"{'─' * 6}  {'─' * 7}  {'─' * 5}  {'─' * 5}  {'─' * 12}")
+
+        # Productive reward history: only rewards from iterations that accepted
+        # at least 1 candidate. Zero-acceptance iterations yield reward=0.0 which
+        # is meaningless for plateau detection (it just means the LLM couldn't
+        # find valid candidates, not that the ontology converged).
+        productive_reward_history: List[float] = []
         plateau_count = 0
+        stagnation_count = 0
         iteration_count = 0
+        termination_reason = "max_iterations"
+        prev_node_count = self.ontology_graph.number_of_nodes()
+
+        # Snapshot of non-instance nodes that exist BEFORE expansion begins.
+        # The "all visited" check uses this fixed set so that newly-added
+        # expandable nodes don't push the convergence goal further away.
+        pre_expansion_expandable = frozenset(
+            node_id for node_id in self.ontology_graph.nodes()
+            if self.ontology_graph.nodes[node_id].get("level") != "instance"
+        )
+
+        # Convergence thresholds
+        PLATEAU_LIMIT = 3   # consecutive productive plateaus to trigger convergence
+        STAGNATION_LIMIT = 5  # consecutive no-growth iterations to trigger convergence
 
         for iteration in range(self.max_iterations):
             iteration_count = iteration + 1
@@ -1512,72 +1777,209 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
 
             # Check if no expandable nodes remain
             if stats["node"] is None:
+                termination_reason = "no_expandable_nodes"
                 logger.info("No expandable nodes remaining; terminating expansion")
+
+                # Record a terminal expansion record
+                self.history.expansion_records.append(ExpansionRecord(
+                    iteration=iteration_count,
+                    node_expanded=None,
+                    candidates_generated=0,
+                    candidates_accepted=0,
+                    reward=0.0,
+                    cumulative_nodes=self.ontology_graph.number_of_nodes(),
+                    cumulative_edges=self.ontology_graph.number_of_edges(),
+                    acceptance_rate=0.0,
+                    plateau_count=plateau_count,
+                    stagnation_count=stagnation_count,
+                    elapsed_seconds=time.monotonic() - pipeline_start,
+                ))
+                print(f"  {iteration_count:>4d}  {'—':<20s}  {'—':>4s}  {'—':>4s}  "
+                      f"{'—':>6s}  {'—':>7s}  "
+                      f"{self.ontology_graph.number_of_nodes():>5d}  "
+                      f"{self.ontology_graph.number_of_edges():>5d}  "
+                      f"no nodes left")
                 break
 
-            # Track reward
+            # Track reward and convergence signals
             current_reward = stats["reward"]
+            gen_count = stats["candidates_generated"]
+            acc_count = stats["candidates_accepted"]
+            acc_rate = acc_count / gen_count if gen_count > 0 else 0.0
+            cur_nodes = self.ontology_graph.number_of_nodes()
+            cur_edges = self.ontology_graph.number_of_edges()
 
-            # Check for plateau (reward delta < 0.01)
-            if reward_history:
-                delta = abs(current_reward - reward_history[-1])
-                if delta < 0.01:
-                    plateau_count += 1
-                    logger.debug(f"Plateau detected (delta={delta:.4f}); count={plateau_count}")
-                else:
-                    plateau_count = 0
-                    logger.debug(f"Reward improved (delta={delta:.4f}); plateau reset")
-            
-            reward_history.append(current_reward)
+            # ── Plateau detection (productive iterations only) ────────
+            # Only compare rewards when candidates were actually accepted.
+            # Zero-acceptance iterations (reward=0.0) are skipped to avoid
+            # artificial oscillation between 0.85 and 0.0.
+            if acc_count > 0:
+                if productive_reward_history:
+                    delta = abs(current_reward - productive_reward_history[-1])
+                    if delta < 0.01:
+                        plateau_count += 1
+                        logger.debug(
+                            f"Plateau detected (delta={delta:.4f}); count={plateau_count}"
+                        )
+                    else:
+                        plateau_count = 0
+                        logger.debug(
+                            f"Reward changed (delta={delta:.4f}); plateau reset"
+                        )
+                productive_reward_history.append(current_reward)
+            # else: zero-acceptance iteration — plateau_count unchanged
 
-            # Check early termination condition:
-            # Plateau for 3+ iterations AND all non-leaf nodes visited at least once
-            if plateau_count >= 3:
-                # Check if all non-instance nodes have n_visits >= 1
-                non_instance_nodes = [
-                    node_id for node_id in self.ontology_graph.nodes()
-                    if self.ontology_graph.nodes[node_id].get("level") != "instance"
-                ]
-                all_visited = all(
+            # ── Growth stagnation detection ───────────────────────────
+            # If the graph didn't grow (no new nodes added), increment
+            # the stagnation counter. Any growth resets it.
+            if cur_nodes > prev_node_count:
+                stagnation_count = 0
+            else:
+                stagnation_count += 1
+                logger.debug(
+                    f"Stagnation detected (nodes unchanged at {cur_nodes}); "
+                    f"count={stagnation_count}"
+                )
+            prev_node_count = cur_nodes
+
+            # Record expansion record
+            self.history.expansion_records.append(ExpansionRecord(
+                iteration=iteration_count,
+                node_expanded=stats["node"],
+                candidates_generated=gen_count,
+                candidates_accepted=acc_count,
+                reward=current_reward,
+                cumulative_nodes=cur_nodes,
+                cumulative_edges=cur_edges,
+                acceptance_rate=acc_rate,
+                plateau_count=plateau_count,
+                stagnation_count=stagnation_count,
+                elapsed_seconds=time.monotonic() - pipeline_start,
+            ))
+
+            # ── Build status label ────────────────────────────────────
+            status_parts: List[str] = []
+            if plateau_count > 0:
+                status_parts.append(f"plateau({plateau_count})")
+            if stagnation_count > 0:
+                status_parts.append(f"stagnant({stagnation_count})")
+            status = " ".join(status_parts)
+
+            # ── Check early termination conditions ────────────────────
+            # Condition A: Reward plateau — reward from productive iterations
+            # hasn't changed for PLATEAU_LIMIT consecutive productive iterations
+            # AND all non-instance nodes from the ORIGINAL seed have been visited.
+            if plateau_count >= PLATEAU_LIMIT:
+                all_seed_visited = all(
                     self.ontology_graph.nodes[node].get("n_visits", 0) >= 1
-                    for node in non_instance_nodes
+                    for node in pre_expansion_expandable
+                    if node in self.ontology_graph.nodes
                 )
 
-                if all_visited:
-                    logger.info(
-                        f"Early termination: plateau for {plateau_count} iterations "
-                        "and all non-instance nodes visited"
+                if all_seed_visited:
+                    termination_reason = (
+                        f"reward plateau for {plateau_count} productive iterations "
+                        f"and all {len(pre_expansion_expandable)} seed nodes visited"
                     )
-                    break
+                    status = "CONVERGED (plateau)"
+                    logger.info(f"Early termination: {termination_reason}")
+
+            # Condition B: Growth stagnation — graph hasn't grown for
+            # STAGNATION_LIMIT consecutive iterations. The LLM is unable
+            # to produce new valid candidates regardless of which node
+            # is selected.
+            if stagnation_count >= STAGNATION_LIMIT and status != "CONVERGED (plateau)":
+                termination_reason = (
+                    f"graph stagnant for {stagnation_count} consecutive iterations "
+                    f"(stuck at {cur_nodes} nodes)"
+                )
+                status = "CONVERGED (stagnant)"
+                logger.info(f"Early termination: {termination_reason}")
+
+            # Truncate node name for display
+            node_display = (stats["node"][:18] + "..") if len(stats["node"]) > 20 else stats["node"]
+
+            # Print iteration row
+            print(f"  {iteration_count:>4d}  {node_display:<20s}  {gen_count:>4d}  {acc_count:>4d}  "
+                  f"{acc_rate:>5.0%}   {current_reward:>6.3f}  {cur_nodes:>5d}  {cur_edges:>5d}  "
+                  f"{status}")
 
             logger.info(
                 f"Iteration {iteration_count}: "
-                f"generated={stats['candidates_generated']}, "
-                f"accepted={stats['candidates_accepted']}, "
-                f"reward={stats['reward']:.3f}"
+                f"generated={gen_count}, accepted={acc_count}, reward={current_reward:.3f}"
             )
 
+            # Break after printing if converged
+            if "CONVERGED" in status:
+                break
+
+        phase_duration = time.monotonic() - phase_start
+        self.history.phases.append(PhaseRecord(
+            phase=4, name="UCB1 expansion", duration_seconds=phase_duration,
+            details={
+                "iterations": iteration_count,
+                "final_plateau_count": plateau_count,
+                "termination_reason": termination_reason,
+            },
+        ))
+        print(f"\n  Expansion finished: {iteration_count} iterations in {phase_duration:.1f}s "
+              f"({termination_reason})")
         logger.info(
             f"Expansion loop complete: {iteration_count} iterations, "
             f"graph now has {self.ontology_graph.number_of_nodes()} nodes"
         )
 
-        # Phase 5: RDF serialization
+        # ── Phase 5: RDF serialization ────────────────────────────────
+        _print_phase(5, "RDF Serialization")
+        phase_start = time.monotonic()
         logger.info("Phase 5: Building RDF graph from DiGraph")
+
         self.build_ontology()
-        logger.info("Serializing to Turtle format")
         turtle_output = self.serialize_ontology()
 
-        # Phase 6: File output
+        phase_duration = time.monotonic() - phase_start
+        num_triples = len(self.rdf)
+        self.history.phases.append(PhaseRecord(
+            phase=5, name="RDF serialization", duration_seconds=phase_duration,
+            details={"triples": num_triples, "format": "turtle"},
+        ))
+        logger.info("Serializing to Turtle format")
+        print(f"  ✓ Built {num_triples} RDF triples ({phase_duration:.1f}s)")
+
+        # ── Phase 6: File output ──────────────────────────────────────
+        _print_phase(6, "File Output")
+        phase_start = time.monotonic()
         logger.info("Phase 6: Writing output to file")
+
         output_path = pathlib.Path("output") / "ontology.ttl"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(turtle_output)
-        logger.info(f"Ontology written to {output_path.absolute()}")
 
-        # Phase 7: Return RDF graph
-        logger.info(f"Pipeline complete: {self.ontology_graph.number_of_nodes()} nodes, "
-                   f"{self.rdf.__len__()} RDF triples")
+        phase_duration = time.monotonic() - phase_start
+        self.history.phases.append(PhaseRecord(
+            phase=6, name="File output", duration_seconds=phase_duration,
+            details={"path": str(output_path.absolute())},
+        ))
+        logger.info(f"Ontology written to {output_path.absolute()}")
+        print(f"  ✓ Written to {output_path.absolute()} ({phase_duration:.1f}s)")
+
+        # ── Finalize history ──────────────────────────────────────────
+        total_duration = time.monotonic() - pipeline_start
+        self.history.completed_at = datetime.now(timezone.utc).isoformat()
+        self.history.total_iterations = iteration_count
+        self.history.final_nodes = self.ontology_graph.number_of_nodes()
+        self.history.final_edges = self.ontology_graph.number_of_edges()
+        self.history.final_triples = num_triples
+        self.history.early_terminated = termination_reason != "max_iterations"
+        self.history.termination_reason = termination_reason
+
+        # Print final summary
+        print(self.history.summary())
+        logger.info(
+            f"Pipeline complete: {self.history.final_nodes} nodes, {num_triples} RDF triples "
+            f"in {total_duration:.1f}s"
+        )
+
         return self.rdf
 
     def _calculate_similarity(self, pairs_table: pd.DataFrame) -> pd.DataFrame:
@@ -1831,3 +2233,349 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         # Tight layout and display
         plt.tight_layout()
         plt.show()
+
+    def plot_convergence(self) -> None:
+        """Plot epoch-style convergence charts from the generation history.
+
+        Produces a multi-panel matplotlib figure similar to neural network training
+        dashboards, showing how key metrics evolved across expansion iterations:
+
+        1. **Reward** — per-iteration mean similarity reward with running average
+        2. **Acceptance Rate** — fraction of generated candidates accepted
+        3. **Graph Growth** — cumulative node and edge counts
+        4. **Plateau Indicator** — consecutive plateau counter over time
+
+        Requires that ``generate_ontology()`` has been run (populates ``self.history``).
+
+        Raises:
+            RuntimeError: If no generation history is available.
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as mticker
+
+        if self.history is None or not self.history.expansion_records:
+            raise RuntimeError(
+                "No generation history available. Run generate_ontology() first."
+            )
+
+        df = self.history.to_dataframe()
+
+        # Filter out terminal records with no node expanded (keep for completeness)
+        plot_df = df[df["node_expanded"].notna()].copy()
+        if plot_df.empty:
+            print("No expansion iterations to plot.")
+            return
+
+        iterations = plot_df["iteration"]
+
+        # Compute running average of reward (window=3, or fewer if not enough data)
+        window = min(3, len(plot_df))
+        plot_df["reward_ma"] = plot_df["reward"].rolling(window=window, min_periods=1).mean()
+
+        # Create figure with 4 subplots
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(
+            f"Ontology Generation Convergence — {self.domain}",
+            fontsize=16, fontweight="bold", y=0.98,
+        )
+
+        # ── Panel 1: Reward curve ─────────────────────────────────
+        ax1 = axes[0, 0]
+        ax1.plot(iterations, plot_df["reward"], "o-", color="#4A90D9",
+                 alpha=0.5, markersize=5, label="Per-iteration reward")
+        ax1.plot(iterations, plot_df["reward_ma"], "-", color="#2C5F8A",
+                 linewidth=2.5, label=f"Moving avg (w={window})")
+        ax1.set_xlabel("Iteration")
+        ax1.set_ylabel("Reward (mean similarity)")
+        ax1.set_title("Reward per Iteration")
+        ax1.legend(loc="lower right", fontsize=9)
+        ax1.set_ylim(bottom=0)
+        ax1.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax1.grid(True, alpha=0.3)
+
+        # ── Panel 2: Acceptance rate ──────────────────────────────
+        ax2 = axes[0, 1]
+        ax2.bar(iterations, plot_df["acceptance_rate"], color="#50C878", alpha=0.7,
+                edgecolor="#3A9D5C", label="Acceptance rate")
+        # Overlay trend line
+        acc_ma = plot_df["acceptance_rate"].rolling(window=window, min_periods=1).mean()
+        ax2.plot(iterations, acc_ma, "-", color="#2D7A47", linewidth=2,
+                 label=f"Moving avg (w={window})")
+        ax2.set_xlabel("Iteration")
+        ax2.set_ylabel("Acceptance Rate")
+        ax2.set_title("Candidate Acceptance Rate")
+        ax2.set_ylim(0, 1.05)
+        ax2.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+        ax2.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax2.legend(loc="lower right", fontsize=9)
+        ax2.grid(True, alpha=0.3)
+
+        # ── Panel 3: Graph growth ─────────────────────────────────
+        ax3 = axes[1, 0]
+        ax3.plot(iterations, plot_df["cumulative_nodes"], "s-", color="#FF8C42",
+                 linewidth=2, markersize=5, label="Nodes")
+        ax3.plot(iterations, plot_df["cumulative_edges"], "^-", color="#D9534F",
+                 linewidth=2, markersize=5, label="Edges")
+        ax3.set_xlabel("Iteration")
+        ax3.set_ylabel("Count")
+        ax3.set_title("Cumulative Graph Growth")
+        ax3.legend(loc="upper left", fontsize=9)
+        ax3.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax3.grid(True, alpha=0.3)
+
+        # ── Panel 4: Plateau indicator ────────────────────────────
+        ax4 = axes[1, 1]
+        colors = ["#D9534F" if p >= 3 else "#FFB347" if p > 0 else "#50C878"
+                  for p in plot_df["plateau_count"]]
+        ax4.bar(iterations, plot_df["plateau_count"], color=colors, alpha=0.8,
+                edgecolor="gray", linewidth=0.5)
+        ax4.axhline(y=3, color="#D9534F", linestyle="--", linewidth=1.5,
+                    alpha=0.7, label="Early-stop threshold")
+        ax4.set_xlabel("Iteration")
+        ax4.set_ylabel("Consecutive Plateaus")
+        ax4.set_title("Plateau Counter (convergence signal)")
+        ax4.legend(loc="upper left", fontsize=9)
+        ax4.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax4.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax4.grid(True, alpha=0.3)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.show()
+
+    def visualize_interactive(self, output_path: str = "ontology.html") -> str:
+        """
+        Render the RDF ontology as a full-page interactive HTML graph using pyvis.
+
+        Only **structural** RDF relationships are visualised (``rdfs:subClassOf``
+        and ``rdf:type`` between domain resources).  Metadata triples are folded
+        into each node's tooltip instead of being drawn as separate edges/nodes:
+
+        - ``rdfs:label`` → used as the node's display name.
+        - ``rdf:type rdfs:Class`` → noted in the tooltip, not drawn as an edge
+          to a meta ``rdfs:Class`` node.
+
+        The domain itself is rendered as the root node (pink) and all top-level
+        classes connect to it via ``rdfs:subClassOf``.
+
+        Node colours:
+        - **Pink** — domain root
+        - **Blue** — classes / subclasses (``rdf:type rdfs:Class``)
+        - **Orange** — instances
+
+        Edge colours:
+        - **Blue** — ``rdfs:subClassOf``
+        - **Green** — ``rdf:type`` (instance → class)
+
+        Args:
+            output_path: File path for the generated HTML.  Defaults to
+                ``"ontology.html"`` in the current working directory.
+
+        Returns:
+            The absolute path to the generated HTML file.
+
+        Raises:
+            ImportError: If ``pyvis`` is not installed.
+            RuntimeError: If the RDF graph is empty.  Call ``build_ontology()`` first.
+        """
+        try:
+            from pyvis.network import Network
+        except ImportError as exc:
+            raise ImportError(
+                "pyvis is required for interactive visualization. "
+                "Install it with: pip install pyvis"
+            ) from exc
+
+        if self.rdf is None or len(self.rdf) == 0:
+            raise RuntimeError(
+                "RDF graph is empty. Run build_ontology() first."
+            )
+
+        # Full-page interactive directed graph
+        net = Network(
+            notebook=True,
+            cdn_resources="in_line",
+            height="100vh",
+            width="100%",
+            directed=True,
+        )
+
+        # ── Colour palette ───────────────────────────────────────
+        DOMAIN_ROOT_COLOR = "#E91E63"   # Pink — domain root
+        CLASS_COLOR = "#4A90D9"         # Blue — class / subclass
+        INSTANCE_COLOR = "#FF8C42"      # Orange — instance
+        EDGE_SUBCLASS = "#2196F3"       # Blue
+        EDGE_TYPE = "#4CAF50"           # Green
+
+        # ── Build look-ups from the RDF graph ────────────────────
+        # Which resources carry rdf:type rdfs:Class?
+        class_resources: set = set()
+        for s, _p, _o in self.rdf.triples((None, RDF.type, RDFS.Class)):
+            class_resources.add(str(s))
+
+        # Collect rdfs:label values (used as node display names)
+        labels: Dict[str, str] = {}
+        for s, _p, o in self.rdf.triples((None, RDFS.label, None)):
+            labels[str(s)] = str(o)
+
+        # Enrich tooltips with internal DiGraph metadata
+        level_map: Dict[str, str] = {}
+        desc_map: Dict[str, str] = {}
+        visit_map: Dict[str, int] = {}
+        reward_map: Dict[str, float] = {}
+        for node_id, data in self.ontology_graph.nodes(data=True):
+            uri = str(self._sanitize_uri(data.get("term", node_id)))
+            level_map[uri] = data.get("level", "")
+            desc_map[uri] = data.get("description", "")
+            visit_map[uri] = data.get("n_visits", 0)
+            reward_map[uri] = data.get("total_reward", 0.0)
+
+        # ── Identify top-level classes (no rdfs:subClassOf subject) ──
+        subclass_subjects = {
+            str(s)
+            for s, _p, _o in self.rdf.triples((None, RDFS.subClassOf, None))
+        }
+        top_level_classes = class_resources - subclass_subjects
+
+        # Synthetic domain root node
+        domain_uri = str(self._sanitize_uri(self.domain))
+        domain_label = self.domain
+
+        # ── Helper: compact URI display ──────────────────────────
+        ns_prefix = str(self.base_namespace)
+
+        def short_uri(uri_str: str) -> str:
+            if uri_str.startswith(ns_prefix):
+                return uri_str[len(ns_prefix):]
+            return uri_str
+
+        # ── Collect nodes ────────────────────────────────────────
+        all_nodes: Dict[str, dict] = {}
+
+        def ensure_node(uri_str: str) -> None:
+            """Register a resource node if not already tracked."""
+            if uri_str in all_nodes:
+                return
+
+            label = labels.get(uri_str, short_uri(uri_str))
+            level = level_map.get(uri_str, "")
+            desc = desc_map.get(uri_str, "")
+            visits = visit_map.get(uri_str, 0)
+            reward = reward_map.get(uri_str, 0.0)
+            is_class = uri_str in class_resources
+
+            # Colour & size by role
+            if uri_str == domain_uri:
+                color = DOMAIN_ROOT_COLOR
+                size = 35
+            elif is_class:
+                color = CLASS_COLOR
+                size = 22
+            else:
+                color = INSTANCE_COLOR
+                size = 16
+
+            title_parts = [
+                f"<b>{label}</b>",
+                f"URI: {uri_str}",
+                f"rdf:type: rdfs:Class" if is_class else "rdf:type: instance",
+                f"Level: {level}" if level else None,
+                f"Description: {desc}" if desc else None,
+                f"UCB1 visits: {visits}, reward: {reward:.2f}" if visits else None,
+            ]
+            title = "<br>".join(p for p in title_parts if p)
+
+            all_nodes[uri_str] = {
+                "label": label,
+                "color": color,
+                "size": size,
+                "title": title,
+                "shape": "dot",
+            }
+
+        # Domain root (always present)
+        all_nodes[domain_uri] = {
+            "label": domain_label,
+            "color": DOMAIN_ROOT_COLOR,
+            "size": 40,
+            "title": (
+                f"<b>{domain_label}</b><br>"
+                f"URI: {domain_uri}<br>"
+                f"Domain root class"
+            ),
+            "shape": "dot",
+        }
+
+        # ── Walk RDF triples — keep only structural edges ────────
+        edges: list = []
+        # URI of the rdfs:Class meta-node — excluded from the graph entirely
+        rdfs_class_uri = str(RDFS.Class)
+
+        for s, p, o in self.rdf:
+            # Skip literal triples (rdfs:label) — already folded into node label
+            if isinstance(o, Literal):
+                continue
+
+            # Skip any triple that involves rdfs:Class as subject or object
+            # (rdf:type rdfs:Class is shown in the tooltip, not as an edge)
+            if str(s) == rdfs_class_uri or str(o) == rdfs_class_uri:
+                continue
+
+            s_str = str(s)
+            o_str = str(o)
+
+            if p == RDFS.subClassOf:
+                pred_label = "rdfs:subClassOf"
+                edge_color = EDGE_SUBCLASS
+            elif p == RDF.type:
+                # Instance → class typing edge
+                pred_label = "rdf:type"
+                edge_color = EDGE_TYPE
+            else:
+                # Other predicates — include but style generically
+                pred_label = short_uri(str(p))
+                edge_color = "#999999"
+
+            ensure_node(s_str)
+            ensure_node(o_str)
+            edges.append((s_str, o_str, pred_label, edge_color))
+
+        # ── Connect top-level classes to domain root ─────────────
+        for cls_uri in top_level_classes:
+            ensure_node(cls_uri)
+            edges.append((cls_uri, domain_uri, "rdfs:subClassOf", EDGE_SUBCLASS))
+
+        # ── Populate pyvis network ───────────────────────────────
+        for node_id, props in all_nodes.items():
+            net.add_node(
+                node_id,
+                label=props["label"],
+                title=props["title"],
+                color=props["color"],
+                size=props["size"],
+                shape=props["shape"],
+            )
+
+        for src, dst, pred_label, edge_color in edges:
+            net.add_edge(
+                src,
+                dst,
+                label=pred_label,
+                title=pred_label,
+                arrows="to",
+                color=edge_color,
+            )
+
+        # ── Physics / layout ─────────────────────────────────────
+        net.repulsion(
+            node_distance=250,
+            central_gravity=0.15,
+            spring_length=180,
+            spring_strength=0.04,
+            damping=0.09,
+        )
+
+        # ── Render ───────────────────────────────────────────────
+        net.show(output_path)
+        abs_path = os.path.abspath(output_path)
+        logger.info(f"Interactive RDF ontology graph saved to {abs_path}")
+        return abs_path

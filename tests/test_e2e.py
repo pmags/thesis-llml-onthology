@@ -80,7 +80,9 @@ def mock_agent_for_e2e():
         {"term": "Romulans", "description": "Species with pointed ears rival to Vulcans"}
     ])
     
-    # Configure chat() to return different responses based on prompt content
+    # Configure chat() to return different responses based on prompt content.
+    # Uses lambda-style function (not finite list) to avoid StopIteration if pipeline
+    # makes more calls than expected (e.g., if expansion parameters change).
     def chat_side_effect(instructions: str = "", input: str = "", prompt: str = ""):
         # Consolidate all possible prompt sources
         full_prompt = (instructions + input + prompt).lower()
@@ -94,14 +96,16 @@ def mock_agent_for_e2e():
     
     agent.chat.side_effect = chat_side_effect
     
-    # Configure similarity: high for parent-child, lower for cross-branch
-    def similarity_side_effect(term_a: str = "", description_a: str = "", term_b: str = "", description_b: str = ""):
+    # Configure similarity: high for parent-child, lower for cross-branch.
+    # Uses lambda-style function (not finite list) to avoid StopIteration if pipeline
+    # makes more validation calls than expected (e.g., if more candidates are generated).
+    def similarity_side_effect(term_x: str = "", description_x: str = "", term_y: str = "", description_y: str = ""):
         # Always return high similarity to ensure candidates are accepted
         return {
-            "term_x": term_a,
-            "description_x": description_a,
-            "term_y": term_b,
-            "description_y": description_b,
+            "term_x": term_x,
+            "description_x": description_x,
+            "term_y": term_y,
+            "description_y": description_y,
             "similarity": 75
         }
     

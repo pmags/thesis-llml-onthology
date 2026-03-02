@@ -438,10 +438,10 @@ class TestValidationPruning:
         initial_edges = sample_digraph.ontology_graph.number_of_edges()
 
         # Setup: Mock agent to return low similarity for "Species" vs "Vulcans"
-        def mock_similarity(term_a, description_a, term_b, description_b):
+        def mock_similarity(term_x, description_x, term_y, description_y):
             """Mock similarity: low for Species-Vulcans, medium for others."""
-            if (term_a == "Species" and term_b == "Vulcans") or \
-               (term_a == "Vulcans" and term_b == "Species"):
+            if (term_x == "Species" and term_y == "Vulcans") or \
+               (term_x == "Vulcans" and term_y == "Species"):
                 return {"similarity": 25.0}  # Below 50% threshold
             return {"similarity": 80.0}  # Above threshold for other pairs
 
@@ -521,9 +521,9 @@ class TestValidationPruning:
         initial_edges = sample_digraph.ontology_graph.number_of_edges()
 
         # Setup: Mock agent to return low similarity for Spock-T'Pol pair only
-        def mock_similarity(term_a, description_a, term_b, description_b):
+        def mock_similarity(term_x, description_x, term_y, description_y):
             """Mock similarity: low for Spock-T'Pol, medium for others."""
-            terms = {term_a, term_b}
+            terms = {term_x, term_y}
             if terms == {"Spock", "T'Pol"}:
                 return {"similarity": 20.0}  # Below 30% sibling threshold
             return {"similarity": 75.0}  # Above threshold for other pairs
@@ -559,9 +559,9 @@ class TestValidationPruning:
         initial_edges = sample_digraph.ontology_graph.number_of_edges()
 
         # Setup: Mock agent to return high similarity for cross-branch pair
-        def mock_similarity(term_a, description_a, term_b, description_b):
+        def mock_similarity(term_x, description_x, term_y, description_y):
             """Mock similarity: high for Vulcans-Planet pair."""
-            terms = {term_a, term_b}
+            terms = {term_x, term_y}
             if terms == {"Vulcans", "Planet"}:
                 return {"similarity": 85.0}  # Above 70% cross-branch threshold
             return {"similarity": 50.0}  # Below threshold for other pairs
@@ -634,7 +634,7 @@ class TestOrphanDetection:
         """
         # Setup: Mock agent to return low similarity for all parent-child pairs
         # This will prune ALL edges in the graph
-        def mock_similarity(term_a, description_a, term_b, description_b):
+        def mock_similarity(term_x, description_x, term_y, description_y):
             """Mock similarity: low for all pairs."""
             return {"similarity": 10.0}  # Below 50% parent-child threshold
 
