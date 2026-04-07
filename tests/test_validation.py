@@ -34,7 +34,7 @@ def sample_digraph(mock_agent):
     This fixture provides a realistic test graph that exercises all three
     pair categories (parent-child, sibling, cross-branch).
     """
-    ontology = Ontology(domain="Star Trek", agent=mock_agent)
+    ontology = Ontology(domain="Star Trek", agent=mock_agent, similarity_threshold=50)
 
     # Create nodes at each level with attributes
     # Level 0: Classes
@@ -342,20 +342,17 @@ class TestValidationPairsGeneration:
             term_x = pair["term_x"]
             term_y = pair["term_y"]
 
-            # Find all parents of term_x and term_y
-            parents_x = set()
-            parents_y = set()
-
-            for node_id in sample_digraph.ontology_graph.nodes():
-                node_term = sample_digraph.ontology_graph.nodes[node_id]["term"]
-                if node_term == term_x:
-                    node_x_id = node_id
-                if node_term == term_y:
-                    node_y_id = node_id
+            # Build term→node_id lookup
+            term_to_id = {
+                sample_digraph.ontology_graph.nodes[n]["term"]: n
+                for n in sample_digraph.ontology_graph.nodes()
+            }
+            assert term_x in term_to_id, f"Should find node for term {term_x}"
+            assert term_y in term_to_id, f"Should find node for term {term_y}"
 
             # Get predecessors (parents)
-            parents_x = set(sample_digraph.ontology_graph.predecessors(node_x_id))
-            parents_y = set(sample_digraph.ontology_graph.predecessors(node_y_id))
+            parents_x = set(sample_digraph.ontology_graph.predecessors(term_to_id[term_x]))
+            parents_y = set(sample_digraph.ontology_graph.predecessors(term_to_id[term_y]))
 
             # Assert: They share at least one parent
             common_parents = parents_x & parents_y

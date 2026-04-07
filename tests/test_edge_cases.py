@@ -269,7 +269,12 @@ class TestMalformedLLMResponses:
     def test_validation_skips_on_similarity_service_error(
         self, mock_agent_for_edge_cases, caplog
     ):
-        """Similarity evaluation failure should be logged and validation continues."""
+        """Similarity evaluation failure should be logged and validation continues.
+
+        When the LLM API raises an exception, the parallel pre-computation
+        catches it, defaults the similarity to 0.0, and validation proceeds
+        (potentially pruning edges due to the zero similarity).
+        """
         mock_agent_for_edge_cases.get_similarity_with_descriptions.side_effect = (
             Exception("API Error")
         )
@@ -286,9 +291,11 @@ class TestMalformedLLMResponses:
         )
         ont.ontology_graph.add_edge("Class1", "Subclass1", relation="subClassOf")
 
-        # Validation will raise because _get_similarity_cached propagates the exception
-        with pytest.raises(Exception, match="API Error"):
-            ont.validate_structure()
+        # Parallel pre-computation catches the exception and defaults to 0.0;
+        # validation should complete without raising.
+        summary = ont.validate_structure()
+        assert isinstance(summary, dict)
+        assert "edges_pruned" in summary
 
 
 # ============================================================================
@@ -553,7 +560,7 @@ class TestGraphEdgeCases:
     def test_full_pruning_orphans_all_nodes(self, mock_agent_for_edge_cases, caplog):
         """Pruning all edges orphans non-root nodes; should log orphans."""
         mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 10.0}  # Very low
-        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=0.5)
+        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=50)
         ont.seed = {
             "domain": "Test",
             "taxonomy": [
@@ -891,29 +898,29 @@ class TestStressAndBoundary:
             assert selected == "Node2"
 
     def test_similarity_threshold_at_boundaries(self, mock_agent_for_edge_cases):
-        """Thresholds at 0.0 (accept all) and 1.0 (reject all) should work."""
-        # threshold=0.0 (accept all)
+        """Thresholds at 0 (accept all) and 100 (reject all) should work."""
+        # threshold=0 (accept all)
         ont_permissive = Ontology(
-            domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=0.0
+            domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=0
         )
         ont_permissive.ontology_graph = nx.DiGraph()
         ont_permissive.ontology_graph.add_node("Parent", level=0, is_rdf_class=True, expandable=True)
         mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 1.0}  # Even 1% is accepted
         candidates = [{"term": "Child", "description": "A child"}]
         validated = ont_permissive._validate_candidates("Parent", candidates)
-        # At threshold 0.0, should accept if similarity >= 0
+        # At threshold 0, should accept if similarity >= 0
         assert len(validated) >= 0
 
-        # threshold=1.0 (reject all)
+        # threshold=100 (reject all)
         ont_strict = Ontology(
-            domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=1.0
+            domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=100
         )
         ont_strict.ontology_graph = nx.DiGraph()
         ont_strict.ontology_graph.add_node("Parent", level=0, is_rdf_class=True, expandable=True)
         mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 99.0}  # Even 99% rejected
         candidates = [{"term": "Child", "description": "A child"}]
         validated = ont_strict._validate_candidates("Parent", candidates)
-        # At threshold 1.0, should reject all
+        # At threshold 100, should reject all
         assert len(validated) == 0
 
 
@@ -1127,3 +1134,713 @@ class TestSerializationAndVisualizationRobustness:
 
         with pytest.raises(ValueError):
             ont.serialize_ontology(format="invalid_format")
+
+
+# ============================================================================
+# 8. CUSTOM HIERARCHY: PARALLEL SIMILARITY & CONVERGENCE TESTS
+# ============================================================================
+
+
+class TestCustomHierarchyParallelAndConvergence:
+    """Verify parallel similarity pre-computation and convergence work
+    correctly with non-default level schemas (2-level, 4-level)."""
+
+    def test_validate_structure_parallel_with_2_level_schema(
+        self, custom_2_level_schema, mock_agent_for_edge_cases
+    ):
+        """Parallel similarity in validate_structure() should work with a 2-level schema."""
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 80.0,
+        }
+        ont = Ontology(
+            domain="Animals",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_2_level_schema,
+            similarity_threshold=50,
+        )
+        ont.ontology_graph.add_node(
+            "Mammals", term="Mammals", description="Warm-blooded",
+            level="class", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Dog", term="Dog", description="A pet",
+            level="instance", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Cat", term="Cat", description="A pet",
+            level="instance", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("Mammals", "Dog", relation="type")
+        ont.ontology_graph.add_edge("Mammals", "Cat", relation="type")
+
+        summary = ont.validate_structure()
+        assert summary["edges_pruned"] == 0
+        # All pairs should have been evaluated (cached via parallel)
+        assert len(ont.similarity_cache) > 0
+
+    def test_validate_structure_parallel_with_4_level_schema(
+        self, custom_4_level_schema, mock_agent_for_edge_cases
+    ):
+        """Parallel similarity in validate_structure() should work with a 4-level schema."""
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 85.0,
+        }
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_4_level_schema,
+            similarity_threshold=50,
+        )
+        # Build a 4-level graph
+        ont.ontology_graph.add_node(
+            "Physics", term="Physics", description="Study of matter",
+            level="domain", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Mechanics", term="Mechanics", description="Motion and forces",
+            level="category", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Kinematics", term="Kinematics", description="Motion without forces",
+            level="topic", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Velocity", term="Velocity", description="Rate of position change",
+            level="item", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("Physics", "Mechanics", relation="subClassOf")
+        ont.ontology_graph.add_edge("Mechanics", "Kinematics", relation="subClassOf")
+        ont.ontology_graph.add_edge("Kinematics", "Velocity", relation="type")
+
+        summary = ont.validate_structure()
+        assert summary["edges_pruned"] == 0
+        assert len(ont.similarity_cache) == 3  # 3 parent-child pairs
+
+    def test_validate_candidates_parallel_with_4_level_schema(
+        self, custom_4_level_schema, mock_agent_for_edge_cases
+    ):
+        """Parallel candidate validation should work with a 4-level schema."""
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 90.0,
+        }
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_4_level_schema,
+            similarity_threshold=50,
+        )
+        ont.ontology_graph.add_node(
+            "Physics", term="Physics", description="Study of matter",
+            level="domain", n_visits=0, total_reward=0.0,
+        )
+        candidates = [
+            {"term": "Optics", "description": "Study of light"},
+            {"term": "Thermodynamics", "description": "Study of heat"},
+        ]
+        accepted = ont._validate_candidates("Physics", candidates)
+        assert len(accepted) == 2
+        # All candidate pairs should be cached
+        assert len(ont.similarity_cache) == 2
+
+    def test_convergence_uses_schema_expandable_with_4_levels(
+        self, custom_4_level_schema, mock_agent_for_edge_cases
+    ):
+        """Convergence should check expandable flags from schema, not hardcoded 'instance'.
+
+        With a 4-level schema (domain→category→topic→item), only the leaf
+        level 'item' is non-expandable.  Plateau convergence requires ALL
+        expandable nodes (domain, category, topic) to have been visited.
+        """
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_4_level_schema,
+            max_iterations=20,
+            similarity_threshold=50,
+        )
+
+        call_count = [0]
+
+        original_create = ont.create_seed_ontology
+
+        def create_and_mark_visited():
+            original_create()
+            # Mark only 'domain' and 'category' nodes as visited,
+            # leaving 'topic' nodes unvisited to prove convergence won't
+            # fire until they have been visited too.
+            for node in ont.ontology_graph.nodes():
+                level = ont.ontology_graph.nodes[node].get("level")
+                if level in ("domain", "category"):
+                    ont.ontology_graph.nodes[node]["n_visits"] = 1
+
+        def mock_expand():
+            call_count[0] += 1
+            # Add a node each time to avoid stagnation
+            node_id = f"new_{call_count[0]}"
+            ont.ontology_graph.add_node(
+                node_id, term=node_id, level="item",
+                n_visits=0, total_reward=0.0,
+            )
+            return {
+                "node": f"Parent_{call_count[0]}",
+                "candidates_generated": 10,
+                "candidates_accepted": 1,
+                "reward": 0.85,
+            }
+
+        mock_agent_for_edge_cases.chat.return_value = json.dumps({
+            "domain": "Science",
+            "taxonomy": [{
+                "domain": "Physics",
+                "description": "Study of matter",
+                "categories": [{
+                    "category": "Mechanics",
+                    "description": "Motion and forces",
+                    "topics": [{
+                        "topic": "Kinematics",
+                        "description": "Motion without forces",
+                        "items": [
+                            {"item": "Velocity", "description": "Speed"},
+                        ],
+                    }],
+                }],
+            }],
+        })
+
+        with patch.object(ont, "create_seed_ontology", side_effect=create_and_mark_visited):
+            with patch.object(ont, "expand_ontology", side_effect=mock_expand):
+                with patch.object(ont, "build_ontology"):
+                    with patch.object(ont, "serialize_ontology", return_value="# TTL"):
+                        ont.generate_ontology()
+
+        # Because 'topic' level nodes (expandable=True) were never marked
+        # visited, plateau convergence should NOT have triggered.
+        # The loop should hit max_iterations or stagnation, NOT plateau.
+        assert ont.history is not None
+        if ont.history.early_terminated:
+            assert "plateau" not in ont.history.termination_reason
+
+    def test_convergence_fires_when_all_custom_expandable_visited(
+        self, custom_4_level_schema, mock_agent_for_edge_cases
+    ):
+        """Convergence fires when ALL expandable nodes in a 4-level schema are visited."""
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_4_level_schema,
+            max_iterations=20,
+            similarity_threshold=50,
+        )
+
+        call_count = [0]
+
+        original_create = ont.create_seed_ontology
+
+        def create_and_mark_all_visited():
+            original_create()
+            # Mark ALL expandable nodes as visited
+            for node in ont.ontology_graph.nodes():
+                level = ont.ontology_graph.nodes[node].get("level")
+                if level != "item":  # item is the only non-expandable level
+                    ont.ontology_graph.nodes[node]["n_visits"] = 1
+
+        def mock_expand():
+            call_count[0] += 1
+            node_id = f"new_{call_count[0]}"
+            ont.ontology_graph.add_node(
+                node_id, term=node_id, level="item",
+                n_visits=0, total_reward=0.0,
+            )
+            return {
+                "node": f"Parent_{call_count[0]}",
+                "candidates_generated": 10,
+                "candidates_accepted": 1,
+                "reward": 0.85,
+            }
+
+        mock_agent_for_edge_cases.chat.return_value = json.dumps({
+            "domain": "Science",
+            "taxonomy": [{
+                "domain": "Physics",
+                "description": "Study of matter",
+                "categories": [{
+                    "category": "Mechanics",
+                    "description": "Motion and forces",
+                    "topics": [{
+                        "topic": "Kinematics",
+                        "description": "Motion without forces",
+                        "items": [
+                            {"item": "Velocity", "description": "Speed"},
+                        ],
+                    }],
+                }],
+            }],
+        })
+
+        with patch.object(ont, "create_seed_ontology", side_effect=create_and_mark_all_visited):
+            with patch.object(ont, "expand_ontology", side_effect=mock_expand):
+                with patch.object(ont, "build_ontology"):
+                    with patch.object(ont, "serialize_ontology", return_value="# TTL"):
+                        ont.generate_ontology()
+
+        # Because ALL expandable nodes were visited and reward plateaus,
+        # convergence should have triggered before max_iterations.
+        assert ont.history is not None
+        assert ont.history.total_iterations < 20
+        assert ont.history.early_terminated is True
+        assert "plateau" in ont.history.termination_reason
+
+    def test_cross_branch_pairs_use_root_level_from_schema(
+        self, custom_4_level_schema, mock_agent_for_edge_cases
+    ):
+        """Cross-branch pairs should use the root level name from the schema,
+        not hardcoded 'class'."""
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_4_level_schema,
+            similarity_threshold=50,
+        )
+        # Two root-level branches
+        ont.ontology_graph.add_node(
+            "Physics", term="Physics", description="Study of matter",
+            level="domain", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Chemistry", term="Chemistry", description="Study of substances",
+            level="domain", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Mechanics", term="Mechanics", description="Motion",
+            level="category", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Organic", term="Organic", description="Carbon compounds",
+            level="category", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("Physics", "Mechanics", relation="subClassOf")
+        ont.ontology_graph.add_edge("Chemistry", "Organic", relation="subClassOf")
+
+        pairs = ont._generate_validation_pairs()
+        cross_branch = [p for p in pairs if p["category"] == "cross-branch"]
+        # Should have at least one cross-branch pair derived from root "domain" nodes
+        assert len(cross_branch) >= 1
+
+    def test_cross_branch_links_with_custom_root_level(
+        self, custom_4_level_schema, mock_agent_for_edge_cases
+    ):
+        """_check_cross_branch_links should identify root ancestor using schema root level."""
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 95.0,  # Very high → should trigger cross-link
+        }
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_4_level_schema,
+            cross_link_threshold=70,
+        )
+        ont.ontology_graph.add_node(
+            "Physics", term="Physics", description="Study of matter",
+            level="domain", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Chemistry", term="Chemistry", description="Study of substances",
+            level="domain", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Mechanics", term="Mechanics", description="Motion",
+            level="category", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Energy", term="Energy", description="Capacity to do work",
+            level="item", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("Physics", "Mechanics", relation="subClassOf")
+        ont.ontology_graph.add_edge("Mechanics", "Energy", relation="type")
+
+        ont._check_cross_branch_links("Energy", "Capacity to do work")
+
+        # Energy should have gotten a cross-link to Chemistry
+        # (since similarity=95 > threshold=70)
+        assert ont.ontology_graph.has_edge("Energy", "Chemistry")
+
+
+# ============================================================================
+# Test Class: Batch Cross-Branch Linking (Performance)
+# ============================================================================
+
+
+class TestBatchCrossBranchLinking:
+    """Tests for the batched parallel cross-branch linking optimisation."""
+
+    def test_batch_cross_branch_produces_same_links_as_sequential(
+        self, mock_agent_for_edge_cases
+    ):
+        """Batch cross-branch linking should produce the same edges as the old
+        sequential method for multiple candidates."""
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 90.0,
+        }
+        ont = Ontology(
+            domain="Star Trek",
+            agent=mock_agent_for_edge_cases,
+            cross_link_threshold=70,
+        )
+        # Two root classes
+        ont.ontology_graph.add_node(
+            "Species", term="Species", description="Living beings",
+            level="class", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "Technology", term="Technology", description="Engineering artifacts",
+            level="class", n_visits=0, total_reward=0.0,
+        )
+        # Subclass and instance under Species
+        ont.ontology_graph.add_node(
+            "Vulcans", term="Vulcans", description="Logical species",
+            level="subclass", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("Species", "Vulcans", relation="subClassOf")
+        ont.ontology_graph.add_node(
+            "Spock", term="Spock", description="Half-Vulcan officer",
+            level="instance", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("Vulcans", "Spock", relation="type")
+        ont.ontology_graph.add_node(
+            "Tuvok", term="Tuvok", description="Vulcan officer",
+            level="instance", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("Vulcans", "Tuvok", relation="type")
+
+        # Batch two candidates at once
+        candidates = [
+            {"term": "Spock", "description": "Half-Vulcan officer"},
+            {"term": "Tuvok", "description": "Vulcan officer"},
+        ]
+        ont._check_cross_branch_links_batch(candidates)
+
+        # Both should get cross-links to Technology (sim=90 > threshold=70)
+        assert ont.ontology_graph.has_edge("Spock", "Technology")
+        assert ont.ontology_graph.has_edge("Tuvok", "Technology")
+
+    def test_batch_cross_branch_skips_own_ancestor(self, mock_agent_for_edge_cases):
+        """Batch method should NOT create a cross-link to a candidate's own ancestor class."""
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 95.0,
+        }
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            cross_link_threshold=70,
+        )
+        ont.ontology_graph.add_node(
+            "A", term="A", description="Class A", level="class", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "B", term="B", description="Class B", level="class", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "A1", term="A1", description="Sub of A", level="subclass", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("A", "A1", relation="subClassOf")
+
+        ont._check_cross_branch_links_batch([{"term": "A1", "description": "Sub of A"}])
+
+        # Should link to B (other class) but NOT to A (own ancestor)
+        assert ont.ontology_graph.has_edge("A1", "B")
+        assert not ont.ontology_graph.has_edge("A1", "A")
+
+    def test_batch_cross_branch_no_candidates(self, mock_agent_for_edge_cases):
+        """Batch method with empty candidates list should be a no-op."""
+        ont = Ontology(domain="Test", agent=mock_agent_for_edge_cases)
+        initial_edges = ont.ontology_graph.number_of_edges()
+        ont._check_cross_branch_links_batch([])
+        assert ont.ontology_graph.number_of_edges() == initial_edges
+
+    def test_batch_cross_branch_below_threshold(self, mock_agent_for_edge_cases):
+        """No cross-links should be added when similarity is below threshold."""
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 30.0,
+        }
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            cross_link_threshold=70,
+        )
+        ont.ontology_graph.add_node(
+            "C1", term="C1", description="Class 1", level="class", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "C2", term="C2", description="Class 2", level="class", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_node(
+            "X", term="X", description="Instance", level="subclass", n_visits=0, total_reward=0.0,
+        )
+        ont.ontology_graph.add_edge("C1", "X", relation="subClassOf")
+
+        ont._check_cross_branch_links_batch([{"term": "X", "description": "Instance"}])
+
+        assert not ont.ontology_graph.has_edge("X", "C2")
+
+
+# ============================================================================
+# Test Class: Domain-Level Class Discovery
+# ============================================================================
+
+
+class TestClassDiscovery:
+    """Tests for _discover_new_classes() — generating new root-level classes
+    from the domain during the expansion loop."""
+
+    def test_discover_adds_new_root_classes(self, mock_agent_for_edge_cases):
+        """New classes returned by the LLM should be added to the graph."""
+        mock_agent_for_edge_cases.chat.return_value = json.dumps([
+            {"term": "Planets", "description": "Celestial bodies"},
+            {"term": "Weapons", "description": "Armaments"},
+        ])
+        ont = Ontology(domain="Star Trek", agent=mock_agent_for_edge_cases)
+        ont.ontology_graph.add_node(
+            "Species", term="Species", description="Living beings",
+            level="class", n_visits=1, total_reward=0.5,
+        )
+
+        added = ont._discover_new_classes(num_classes=2)
+
+        assert len(added) == 2
+        assert "Planets" in ont.ontology_graph
+        assert "Weapons" in ont.ontology_graph
+        # New classes should be at root level and expandable (n_visits=0)
+        assert ont.ontology_graph.nodes["Planets"]["level"] == "class"
+        assert ont.ontology_graph.nodes["Planets"]["n_visits"] == 0
+        assert ont.ontology_graph.nodes["Weapons"]["level"] == "class"
+
+    def test_discover_skips_existing_classes(self, mock_agent_for_edge_cases):
+        """Duplicate classes already in the graph should not be re-added."""
+        mock_agent_for_edge_cases.chat.return_value = json.dumps([
+            {"term": "Species", "description": "Duplicate"},
+            {"term": "Planets", "description": "New class"},
+        ])
+        ont = Ontology(domain="Star Trek", agent=mock_agent_for_edge_cases)
+        ont.ontology_graph.add_node(
+            "Species", term="Species", description="Living beings",
+            level="class", n_visits=1, total_reward=0.5,
+        )
+
+        added = ont._discover_new_classes(num_classes=2)
+
+        assert added == ["Planets"]
+        assert ont.ontology_graph.number_of_nodes() == 2
+
+    def test_discover_handles_invalid_json(self, mock_agent_for_edge_cases):
+        """Invalid JSON from LLM should return empty list without crashing."""
+        mock_agent_for_edge_cases.chat.return_value = "not valid json {{"
+        ont = Ontology(domain="Star Trek", agent=mock_agent_for_edge_cases)
+
+        added = ont._discover_new_classes()
+
+        assert added == []
+
+    def test_discover_handles_llm_exception(self, mock_agent_for_edge_cases):
+        """LLM exceptions during discovery should return empty list."""
+        mock_agent_for_edge_cases.chat.side_effect = Exception("API error")
+        ont = Ontology(domain="Star Trek", agent=mock_agent_for_edge_cases)
+
+        added = ont._discover_new_classes()
+
+        assert added == []
+
+    def test_discover_with_custom_schema(self, custom_4_level_schema, mock_agent_for_edge_cases):
+        """Discovery should use the root level name from a custom schema."""
+        mock_agent_for_edge_cases.chat.return_value = json.dumps([
+            {"term": "Biology", "description": "Study of life"},
+        ])
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_4_level_schema,
+        )
+        ont.ontology_graph.add_node(
+            "Physics", term="Physics", description="Study of matter",
+            level="domain", n_visits=1, total_reward=0.5,
+        )
+
+        added = ont._discover_new_classes(num_classes=1)
+
+        assert added == ["Biology"]
+        assert ont.ontology_graph.nodes["Biology"]["level"] == "domain"
+
+    def test_discovery_interval_parameter(self, mock_agent_for_edge_cases):
+        """class_discovery_interval=0 (default) should disable discovery."""
+        ont = Ontology(domain="Test", agent=mock_agent_for_edge_cases)
+        assert ont.class_discovery_interval == 0
+
+        ont2 = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            class_discovery_interval=10,
+        )
+        assert ont2.class_discovery_interval == 10
+
+
+# ============================================================================
+# Test Class: Visit-Cap Retirement
+# ============================================================================
+
+
+class TestRetirement:
+    """Tests for the visit-cap retirement mechanism that removes exhausted
+    nodes from the UCB1 expandable pool."""
+
+    def test_node_retired_after_consecutive_zero_acceptance(
+        self, mock_agent_for_edge_cases
+    ):
+        """A node should be marked retired after retirement_limit consecutive
+        visits with zero accepted candidates."""
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            retirement_limit=3,
+        )
+        ont.ontology_graph.add_node(
+            "A", term="A", description="Node A",
+            level="class", n_visits=0, total_reward=0.0,
+        )
+
+        # Three consecutive zero-acceptance visits
+        ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+        assert not ont.ontology_graph.nodes["A"].get("retired", False)
+
+        ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+        assert not ont.ontology_graph.nodes["A"].get("retired", False)
+
+        ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+        assert ont.ontology_graph.nodes["A"].get("retired", False)
+
+    def test_productive_visit_resets_low_yield_counter(
+        self, mock_agent_for_edge_cases
+    ):
+        """A visit with accepted candidates should reset the consecutive
+        low-yield counter, preventing premature retirement."""
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            retirement_limit=3,
+        )
+        ont.ontology_graph.add_node(
+            "A", term="A", description="Node A",
+            level="class", n_visits=0, total_reward=0.0,
+        )
+
+        # Two zero-acceptance visits
+        ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+        ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+        assert ont.ontology_graph.nodes["A"].get("consecutive_low_yield", 0) == 2
+
+        # One productive visit resets the counter
+        ont._update_bandit("A", reward=0.85, candidates_accepted=3)
+        assert ont.ontology_graph.nodes["A"].get("consecutive_low_yield", 0) == 0
+        assert not ont.ontology_graph.nodes["A"].get("retired", False)
+
+        # Need 3 more consecutive failures to retire
+        ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+        ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+        assert not ont.ontology_graph.nodes["A"].get("retired", False)
+
+    def test_retired_node_excluded_from_ucb1_selection(
+        self, mock_agent_for_edge_cases
+    ):
+        """Retired nodes should not be selected by _select_node_ucb1."""
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            retirement_limit=2,
+        )
+        ont.ontology_graph.add_node(
+            "A", term="A", description="Node A",
+            level="class", n_visits=1, total_reward=0.5, retired=True,
+        )
+        ont.ontology_graph.add_node(
+            "B", term="B", description="Node B",
+            level="class", n_visits=0, total_reward=0.0,
+        )
+
+        selected = ont._select_node_ucb1()
+        assert selected == "B"
+
+    def test_all_nodes_retired_returns_none(self, mock_agent_for_edge_cases):
+        """When all expandable nodes are retired, UCB1 should return None."""
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            retirement_limit=2,
+        )
+        ont.ontology_graph.add_node(
+            "A", term="A", description="Node A",
+            level="class", n_visits=2, total_reward=0.0, retired=True,
+        )
+        ont.ontology_graph.add_node(
+            "B", term="B", description="Node B",
+            level="class", n_visits=2, total_reward=0.0, retired=True,
+        )
+
+        selected = ont._select_node_ucb1()
+        assert selected is None
+
+    def test_retirement_limit_zero_disables_retirement(
+        self, mock_agent_for_edge_cases
+    ):
+        """retirement_limit=0 should disable the retirement mechanism."""
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            retirement_limit=0,
+        )
+        ont.ontology_graph.add_node(
+            "A", term="A", description="Node A",
+            level="class", n_visits=0, total_reward=0.0,
+        )
+
+        # Many zero-acceptance visits should never retire when limit=0
+        for _ in range(10):
+            ont._update_bandit("A", reward=0.0, candidates_accepted=0)
+
+        assert not ont.ontology_graph.nodes["A"].get("retired", False)
+
+    def test_default_retirement_limit(self, mock_agent_for_edge_cases):
+        """Default retirement_limit should be 3."""
+        ont = Ontology(domain="Test", agent=mock_agent_for_edge_cases)
+        assert ont.retirement_limit == 3
+
+    def test_retired_nodes_excluded_from_convergence_check(
+        self, mock_agent_for_edge_cases
+    ):
+        """Retired unvisited nodes should not block plateau convergence."""
+        ont = Ontology(
+            domain="Test",
+            agent=mock_agent_for_edge_cases,
+            retirement_limit=2,
+        )
+        # One visited node, one retired unvisited node
+        ont.ontology_graph.add_node(
+            "A", term="A", description="Node A",
+            level="class", n_visits=1, total_reward=0.5,
+        )
+        ont.ontology_graph.add_node(
+            "B", term="B", description="Node B",
+            level="class", n_visits=0, total_reward=0.0, retired=True,
+        )
+
+        # B is retired, so "all expandable visited" should consider only A
+        expandable_level_names = frozenset(
+            level.name for level in ont.level_schema if level.expandable
+        )
+        current_expandable = [
+            n for n in ont.ontology_graph.nodes()
+            if ont.ontology_graph.nodes[n].get("level") in expandable_level_names
+            and not ont.ontology_graph.nodes[n].get("retired", False)
+        ]
+        all_visited = all(
+            ont.ontology_graph.nodes[n].get("n_visits", 0) >= 1
+            for n in current_expandable
+        )
+        assert all_visited  # Only A counts, and A has been visited

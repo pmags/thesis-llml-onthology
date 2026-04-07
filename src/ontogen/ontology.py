@@ -6,6 +6,7 @@ ontology generation pipeline: seed generation, iterative expansion,
 graph construction, and RDF serialization.
 """
 
+import concurrent.futures
 import io
 import itertools
 import json
@@ -272,9 +273,13 @@ class Ontology:
         candidates_per_iteration: int = 20,
         level_schema: Optional[List[OntologyLevel]] = None,
         cross_link_threshold: float = 70,
+        max_workers: int = 5,
+        class_discovery_interval: int = 0,
+        retirement_limit: int = 3,
     ) -> None:
         # Configuration
         self.domain = domain
+        self.max_workers = max_workers
         self.agent = agent
         self.seed = seed
         self.exploration_constant = exploration_constant
@@ -284,6 +289,8 @@ class Ontology:
         self.candidates_per_iteration = candidates_per_iteration
         self.level_schema = level_schema or DEFAULT_LEVEL_SCHEMA
         self.cross_link_threshold = cross_link_threshold
+        self.class_discovery_interval = class_discovery_interval
+        self.retirement_limit = retirement_limit
 
         # Internal graph representation
         self.ontology_graph = nx.DiGraph()
@@ -701,6 +708,73 @@ START YOUR RESPONSE WITH {{ CHARACTER. OUTPUT ONLY VALID JSON."""
 
         return term
 
+    def _precompute_similarities_parallel(
+        self,
+        pairs: List[Dict[str, str]],
+        term_a_key: str = "term_a",
+        term_b_key: str = "term_b",
+        desc_a_key: str = "description_a",
+        desc_b_key: str = "description_b",
+    ) -> None:
+        """Pre-fill the similarity cache for multiple pairs using concurrent threads.
+
+        Filters out pairs already in the cache, then evaluates the remaining
+        pairs in parallel via ThreadPoolExecutor.  After this call, every
+        pair is guaranteed to be in ``self.similarity_cache`` so subsequent
+        calls to ``_get_similarity_cached()`` will be instant cache hits.
+
+        Thread-safety note: each uncached pair maps to a unique sorted cache
+        key, so concurrent dict writes do not collide.  CPython's GIL also
+        makes simple dict assignments atomic.
+
+        Args:
+            pairs: List of dicts whose keys are given by the ``*_key`` args.
+            term_a_key: Dict key for the first term.
+            term_b_key: Dict key for the second term.
+            desc_a_key: Dict key for the first description.
+            desc_b_key: Dict key for the second description.
+        """
+        # Deduplicate & filter out cached pairs
+        uncached: Dict[Tuple[str, str], Dict[str, str]] = {}
+        for pair in pairs:
+            cache_key = tuple(sorted([pair[term_a_key], pair[term_b_key]]))
+            if cache_key not in self.similarity_cache and cache_key not in uncached:
+                uncached[cache_key] = pair
+
+        if not uncached:
+            logger.debug("All pairs already cached; nothing to compute")
+            return
+
+        logger.info(
+            f"Pre-computing {len(uncached)} uncached similarity pairs "
+            f"with {self.max_workers} workers"
+        )
+
+        def _evaluate(pair: Dict[str, str]) -> float:
+            return self._get_similarity_cached(
+                term_a=pair[term_a_key],
+                term_b=pair[term_b_key],
+                description_a=pair.get(desc_a_key),
+                description_b=pair.get(desc_b_key),
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_workers
+        ) as executor:
+            future_to_key = {
+                executor.submit(_evaluate, pair): key
+                for key, pair in uncached.items()
+            }
+            for future in concurrent.futures.as_completed(future_to_key):
+                key = future_to_key[future]
+                try:
+                    future.result()  # result is cached inside _get_similarity_cached
+                except Exception as e:
+                    logger.error(f"Parallel similarity failed for {key}: {e}")
+                    self.similarity_cache[key] = 0.0
+
+        logger.info(f"Parallel pre-computation complete for {len(uncached)} pairs")
+
     def _generate_validation_pairs(self) -> List[Dict[str, str]]:
         """Generate validation pairs (parent-child, sibling, cross-branch) from the seeded DiGraph.
 
@@ -763,10 +837,11 @@ START YOUR RESPONSE WITH {{ CHARACTER. OUTPUT ONLY VALID JSON."""
                 pairs.append(pair)
 
         # === CATEGORY 3: Cross-branch pairs ===
-        # Identify all top-level class nodes (nodes with level == "class")
+        # Identify all top-level (root) nodes using the first level in the schema
+        root_level_name = self.level_schema[0].name
         class_nodes = [
             node for node in self.ontology_graph.nodes()
-            if self.ontology_graph.nodes[node]["level"] == "class"
+            if self.ontology_graph.nodes[node]["level"] == root_level_name
         ]
 
         if len(class_nodes) >= 2:
@@ -837,6 +912,18 @@ START YOUR RESPONSE WITH {{ CHARACTER. OUTPUT ONLY VALID JSON."""
 
         # Step 1: Generate validation pairs
         pairs = self._generate_validation_pairs()
+
+        # Step 1b: Pre-compute all similarities in parallel
+        parallel_pairs = [
+            {
+                "term_a": p["term_x"],
+                "term_b": p["term_y"],
+                "description_a": p["desc_x"],
+                "description_b": p["desc_y"],
+            }
+            for p in pairs
+        ]
+        self._precompute_similarities_parallel(parallel_pairs)
 
         # Step 2: Evaluate pairs and apply pruning rules
         # Thresholds (as percentages, 0-100 scale matching LLM output)
@@ -1160,6 +1247,19 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
             f"(threshold={threshold:.1f}%)"
         )
 
+        # Pre-compute all candidate similarities in parallel
+        parallel_pairs = [
+            {
+                "term_a": parent_term,
+                "term_b": c.get("term", ""),
+                "description_a": parent_description,
+                "description_b": c.get("description", ""),
+            }
+            for c in candidates
+            if c.get("term", "")
+        ]
+        self._precompute_similarities_parallel(parallel_pairs)
+
         for candidate in candidates:
             candidate_term = candidate.get("term", "")
             candidate_desc = candidate.get("description", "")
@@ -1281,108 +1381,212 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
             f"'{parent}' with relation={child_relation}"
         )
 
-    def _check_cross_branch_links(self, candidate_term: str, candidate_desc: str) -> None:
-        """Check if a candidate should be typed under additional classes (cross-branch linking).
+    def _check_cross_branch_links_batch(self, candidates: List[Dict[str, str]]) -> None:
+        """Batch cross-branch linking for multiple candidates using parallel pre-computation.
 
-        Cross-branch linking enables rich ontologies where an instance can belong to multiple
-        conceptual classes. For example, "Spock" might be both a "Vulcan" (species) and a
-        "StarfleetOfficer" (role).
+        Collects all (candidate, class-representative) similarity pairs across all
+        candidates, pre-computes them in parallel via _precompute_similarities_parallel(),
+        then applies the cross-branch threshold using only cached lookups.
 
-        Algorithm:
-        1. Get all top-level class nodes (nodes with level == "class")
-        2. Determine candidate's ancestor class (walk up the graph to find the top-level class)
-        3. For each top-level class NOT in the candidate's ancestry:
-           - Pick a representative node (the class itself or one of its children)
-           - Compute similarity between candidate and representative
-           - If similarity > self.cross_link_threshold: add rdf:type edge and log
-        4. Leave the original parent→child edge intact
+        This replaces per-candidate sequential calls with a single parallel batch,
+        reducing wall-clock time from O(candidates * classes) sequential LLM calls
+        to O(candidates * classes / max_workers) parallel batches.
 
         Args:
-            candidate_term: The term string of the newly added candidate.
-            candidate_desc: The description of the candidate.
+            candidates: List of candidate dicts with "term" and "description" keys.
+                        Each candidate must already exist in self.ontology_graph.
         """
-        # Verify candidate exists in graph
-        if candidate_term not in self.ontology_graph:
-            logger.warning(f"Candidate '{candidate_term}' not found in graph for cross-branch check")
+        if not candidates:
             return
 
-        candidate_attrs = self.ontology_graph.nodes[candidate_term]
-
-        # Step 1: Get all top-level class nodes
+        root_level_name = self.level_schema[0].name
         class_nodes = [
             node_id for node_id in self.ontology_graph.nodes()
-            if self.ontology_graph.nodes[node_id].get("level") == "class"
+            if self.ontology_graph.nodes[node_id].get("level") == root_level_name
         ]
 
         if len(class_nodes) == 0:
-            logger.debug("No class nodes found for cross-branch linking")
+            logger.debug("No root-level nodes found for cross-branch linking")
             return
 
-        # Step 2: Determine candidate's ancestor class (walk up the graph)
-        candidate_ancestor_class = None
-        current = candidate_term
-        visited = set()
+        # Build a mapping of class → representative (computed once for all candidates)
+        class_representatives: Dict[str, Tuple[str, str]] = {}
+        for class_node in class_nodes:
+            representative = class_node
+            children = list(self.ontology_graph.successors(class_node))
+            if children:
+                representative = children[0]
+            rep_attrs = self.ontology_graph.nodes[representative]
+            class_representatives[class_node] = (
+                rep_attrs.get("term", representative),
+                rep_attrs.get("description", ""),
+            )
+
+        # For each candidate, find its ancestor class and collect similarity pairs
+        parallel_pairs: List[Dict[str, str]] = []
+        # Track which (candidate_term, class_node) pairs to evaluate after pre-computation
+        evaluation_plan: List[Tuple[str, str, str]] = []  # (candidate_term, class_node, rep_term)
+
+        for candidate in candidates:
+            candidate_term = candidate.get("term", "")
+            candidate_desc = candidate.get("description", "")
+
+            if not candidate_term or candidate_term not in self.ontology_graph:
+                continue
+
+            # Walk up the graph to find the candidate's root-level ancestor
+            ancestor_class = self._find_root_ancestor(candidate_term, root_level_name)
+
+            for class_node in class_nodes:
+                if class_node == ancestor_class:
+                    continue
+
+                rep_term, rep_desc = class_representatives[class_node]
+                parallel_pairs.append({
+                    "term_a": candidate_term,
+                    "term_b": rep_term,
+                    "description_a": candidate_desc,
+                    "description_b": rep_desc,
+                })
+                evaluation_plan.append((candidate_term, class_node, rep_term))
+
+        # Pre-compute all cross-branch similarities in parallel
+        self._precompute_similarities_parallel(parallel_pairs)
+
+        # Apply cross-branch threshold using cached results
+        cross_link_threshold = self.cross_link_threshold / 100.0
+
+        for candidate_term, class_node, rep_term in evaluation_plan:
+            cache_key = tuple(sorted([candidate_term, rep_term]))
+            score = self.similarity_cache.get(cache_key, 0.0) / 100.0
+
+            if score > cross_link_threshold:
+                self.ontology_graph.add_edge(candidate_term, class_node, relation="type")
+                logger.info(
+                    f"Added cross-branch link: '{candidate_term}' → '{class_node}' "
+                    f"(similarity={score:.3f} > threshold={cross_link_threshold:.3f})"
+                )
+
+    def _find_root_ancestor(self, node: str, root_level_name: str) -> Optional[str]:
+        """Walk up the graph from a node to find its root-level ancestor.
+
+        Args:
+            node: The starting node ID.
+            root_level_name: The level name of root nodes (e.g., "class").
+
+        Returns:
+            The root-level ancestor node ID, or None if not found.
+        """
+        current = node
+        visited: set = set()
 
         while current is not None and current not in visited:
             visited.add(current)
             current_level = self.ontology_graph.nodes[current].get("level")
 
-            if current_level == "class":
-                candidate_ancestor_class = current
-                break
+            if current_level == root_level_name:
+                return current
 
-            # Get parent (predecessor in graph)
             predecessors = list(self.ontology_graph.predecessors(current))
-            if predecessors:
-                current = predecessors[0]  # Follow first parent up the hierarchy
-            else:
-                current = None
+            current = predecessors[0] if predecessors else None
 
-        logger.debug(
-            f"Candidate '{candidate_term}' ancestor class: {candidate_ancestor_class or 'not found'}"
-        )
+        return None
 
-        # Step 3: For each class not in the candidate's ancestry, check for cross-branch link
-        cross_link_threshold = self.cross_link_threshold / 100.0  # Convert to 0-1 scale for comparison
+    def _check_cross_branch_links(self, candidate_term: str, candidate_desc: str) -> None:
+        """Check if a single candidate should be typed under additional classes.
 
-        for class_node in class_nodes:
-            # Skip if this is the candidate's own ancestor class
-            if class_node == candidate_ancestor_class:
-                logger.debug(f"Skipping class '{class_node}' (candidate's ancestor)")
+        Delegates to _check_cross_branch_links_batch for a single candidate.
+        Kept for backward compatibility and tests that call this method directly.
+
+        Args:
+            candidate_term: The term string of the newly added candidate.
+            candidate_desc: The description of the candidate.
+        """
+        self._check_cross_branch_links_batch([{"term": candidate_term, "description": candidate_desc}])
+
+    def _discover_new_classes(self, num_classes: int = 2) -> List[str]:
+        """Discover new top-level classes from the domain that are not yet in the ontology.
+
+        Prompts the LLM to suggest new top-level classes for the domain, excluding
+        classes that already exist. Accepted classes are added to the graph as new
+        root-level nodes with n_visits=0, making them eligible for UCB1 expansion.
+
+        Args:
+            num_classes: Number of new classes to request from the LLM. Defaults to 2.
+
+        Returns:
+            List of newly added class term strings. May be shorter than num_classes
+            if duplicates are found or if the LLM response is invalid.
+        """
+        root_level = self.level_schema[0]
+        existing_classes = [
+            self.ontology_graph.nodes[n].get("term", n)
+            for n in self.ontology_graph.nodes()
+            if self.ontology_graph.nodes[n].get("level") == root_level.name
+        ]
+
+        existing_str = ", ".join(f'"{c}"' for c in existing_classes) if existing_classes else "none yet"
+
+        prompt = f"""Given the domain "{self.domain}", suggest {num_classes} NEW top-level {root_level.name}s that are NOT already in the ontology.
+
+Existing {root_level.name}s: {existing_str}
+
+Requirements:
+- Each new {root_level.name} must be a distinct, broad category within "{self.domain}"
+- Do NOT repeat any existing {root_level.name}s listed above
+- Each {root_level.name} should open up a new area of the domain not yet covered
+
+Return ONLY a valid JSON array with no additional text. Each element must have "term" and "description" keys:
+[
+  {{"term": "...", "description": "..."}},
+  {{"term": "...", "description": "..."}}
+]"""
+
+        try:
+            raw = self.agent.chat(
+                instructions="You are an ontology engineer. Suggest new top-level categories.",
+                input=prompt,
+            )
+        except Exception as e:
+            logger.error(f"Class discovery LLM call failed: {e}")
+            return []
+
+        # Parse response
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and "taxonomy" in parsed:
+                parsed = parsed["taxonomy"]
+            if not isinstance(parsed, list):
+                logger.warning(f"Class discovery response is not a list: {type(parsed)}")
+                return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Class discovery JSON parse error: {e}")
+            return []
+
+        # Add valid, non-duplicate classes to the graph
+        added: List[str] = []
+        for item in parsed:
+            term = item.get("term", "").strip() if isinstance(item, dict) else ""
+            desc = item.get("description", "").strip() if isinstance(item, dict) else ""
+
+            if not term:
+                continue
+            if term in self.ontology_graph:
+                logger.info(f"Class discovery: skipping duplicate '{term}'")
                 continue
 
-            # Pick a representative node for this class (prefer a child if available)
-            representative = class_node
-            children = list(self.ontology_graph.successors(class_node))
-            if children:
-                representative = children[0]  # Use first child as representative
-
-            representative_attrs = self.ontology_graph.nodes[representative]
-            representative_term = representative_attrs.get("term", representative)
-            representative_desc = representative_attrs.get("description", "")
-
-            # Compute similarity
-            similarity = self._get_similarity_cached(
-                term_a=candidate_term,
-                description_a=candidate_desc,
-                term_b=representative_term,
-                description_b=representative_desc,
-            ) / 100.0  # Convert LLM scale (0-100) to 0-1
-
-            logger.debug(
-                f"Cross-branch check: '{candidate_term}' vs class '{class_node}' "
-                f"(representative: '{representative_term}'): similarity={similarity:.3f}"
+            self.ontology_graph.add_node(
+                term,
+                term=term,
+                description=desc,
+                level=root_level.name,
+                n_visits=0,
+                total_reward=0.0,
             )
+            added.append(term)
+            logger.info(f"Discovered new {root_level.name}: '{term}'")
 
-            # Add cross-branch link if similarity exceeds threshold
-            if similarity > cross_link_threshold:
-                # Add edge to the top-level class (not the representative)
-                # Edge label is "type" to indicate rdf:type relationship
-                self.ontology_graph.add_edge(candidate_term, class_node, relation="type")
-                logger.info(
-                    f"Added cross-branch link: '{candidate_term}' → '{class_node}' "
-                    f"(similarity={similarity:.3f} > threshold={cross_link_threshold:.3f})"
-                )
+        return added
 
     def _select_node_ucb1(self) -> Optional[str]:
         """Select the next node to expand using the UCB1 (Upper Confidence Bound) algorithm.
@@ -1409,10 +1613,12 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
             ValueError: If expandable nodes exist but all have zero visits (this shouldn't
                 happen in the normal flow, but guards against inconsistent state).
         """
-        # Step 1: Collect all expandable nodes
+        # Step 1: Collect all expandable nodes (skip retired ones)
         expandable_nodes = []
         for node_id in self.ontology_graph.nodes():
             node_attrs = self.ontology_graph.nodes[node_id]
+            if node_attrs.get("retired", False):
+                continue
             node_level = node_attrs.get("level")
             try:
                 level_def = self._get_level(node_level)
@@ -1486,19 +1692,23 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         logger.info(f"Selected node via UCB1: {best_node} (score={best_score:.3f})")
         return best_node
 
-    def _update_bandit(self, node: str, reward: float) -> None:
+    def _update_bandit(
+        self, node: str, reward: float, candidates_accepted: int = 0
+    ) -> None:
         """Update the bandit reward tracking for a node after expansion.
 
         Increments the node's visit count and accumulates the reward (similarity score).
         These values are used by _select_node_ucb1() to balance exploration vs. exploitation.
 
-        The reward is expected to be in the range [0, 1], representing the average
-        similarity of accepted candidates (0-100 LLM scale divided by 100).
+        Also tracks consecutive zero-acceptance visits for retirement logic.
+        When a node accumulates ``self.retirement_limit`` consecutive visits
+        with zero accepted candidates, it is marked ``retired=True`` and
+        excluded from future UCB1 selection.
 
         Args:
             node: The node ID (term string) to update.
-            reward: The reward score (0-1) from this expansion iteration. Typically
-                the mean similarity of accepted candidates.
+            reward: The reward score (0-1) from this expansion iteration.
+            candidates_accepted: Number of candidates accepted this iteration.
 
         Raises:
             ValueError: If the node does not exist in the graph.
@@ -1506,15 +1716,28 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         if node not in self.ontology_graph:
             raise ValueError(f"Node '{node}' not found in ontology graph")
 
+        attrs = self.ontology_graph.nodes[node]
+
         # Increment visit count
-        current_visits = self.ontology_graph.nodes[node].get("n_visits", 0)
-        new_visits = current_visits + 1
-        self.ontology_graph.nodes[node]["n_visits"] = new_visits
+        new_visits = attrs.get("n_visits", 0) + 1
+        attrs["n_visits"] = new_visits
 
         # Accumulate reward
-        current_total_reward = self.ontology_graph.nodes[node].get("total_reward", 0.0)
-        new_total_reward = current_total_reward + reward
-        self.ontology_graph.nodes[node]["total_reward"] = new_total_reward
+        new_total_reward = attrs.get("total_reward", 0.0) + reward
+        attrs["total_reward"] = new_total_reward
+
+        # Track consecutive low-yield visits for retirement
+        if candidates_accepted > 0:
+            attrs["consecutive_low_yield"] = 0
+        else:
+            low_yield = attrs.get("consecutive_low_yield", 0) + 1
+            attrs["consecutive_low_yield"] = low_yield
+            if self.retirement_limit > 0 and low_yield >= self.retirement_limit:
+                attrs["retired"] = True
+                logger.info(
+                    f"Node '{node}' retired after {low_yield} consecutive "
+                    f"zero-acceptance visits"
+                )
 
         logger.info(
             f"Updated bandit for node '{node}': n_visits={new_visits}, "
@@ -1567,8 +1790,9 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         candidates_accepted = len(accepted_candidates)
         logger.info(f"Validated {candidates_accepted} candidates for '{selected_node}'")
 
-        # Step 4: Add accepted candidates to graph and check cross-branch links
+        # Step 4: Add accepted candidates to graph
         accepted_similarities = []
+        added_candidates: List[Dict[str, str]] = []
 
         for candidate in accepted_candidates:
             candidate_term = candidate.get("term", "")
@@ -1578,9 +1802,7 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
                 # Add to graph
                 self._add_candidate_to_graph(selected_node, candidate)
                 
-                # Note: Best practice would be to capture similarity here, but we need to
-                # recompute it since _validate_candidates already consumed it. For efficiency,
-                # we'll recompute once for reward tracking.
+                # Retrieve cached similarity (already computed by _validate_candidates)
                 similarity = self._get_similarity_cached(
                     term_a=self.ontology_graph.nodes[selected_node].get("term", selected_node),
                     description_a=self.ontology_graph.nodes[selected_node].get("description", ""),
@@ -1589,13 +1811,14 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
                 ) / 100.0  # Convert 0-100 scale to 0-1
 
                 accepted_similarities.append(similarity)
-
-                # Check for cross-branch links
-                self._check_cross_branch_links(candidate_term, candidate_desc)
+                added_candidates.append(candidate)
 
             except Exception as e:
                 logger.error(f"Error adding candidate '{candidate_term}' to graph: {e}")
                 continue
+
+        # Step 4b: Batch cross-branch linking for all added candidates in parallel
+        self._check_cross_branch_links_batch(added_candidates)
 
         # Step 5: Compute reward (mean similarity of accepted candidates)
         if accepted_similarities:
@@ -1605,8 +1828,8 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
 
         logger.info(f"Expansion reward for '{selected_node}': {reward:.3f}")
 
-        # Step 6: Update bandit
-        self._update_bandit(selected_node, reward)
+        # Step 6: Update bandit (with retirement tracking)
+        self._update_bandit(selected_node, reward, candidates_accepted)
 
         # Step 7: Return iteration stats
         result = {
@@ -1669,6 +1892,7 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
                 "confidence_threshold": self.confidence_threshold,
                 "candidates_per_iteration": self.candidates_per_iteration,
                 "cross_link_threshold": self.cross_link_threshold,
+                "retirement_limit": self.retirement_limit,
                 "level_schema": [level.name for level in self.level_schema],
             },
         )
@@ -1756,13 +1980,9 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         termination_reason = "max_iterations"
         prev_node_count = self.ontology_graph.number_of_nodes()
 
-        # Snapshot of non-instance nodes that exist BEFORE expansion begins.
-        # The "all visited" check uses this fixed set so that newly-added
-        # expandable nodes don't push the convergence goal further away.
-        pre_expansion_expandable = frozenset(
-            node_id for node_id in self.ontology_graph.nodes()
-            if self.ontology_graph.nodes[node_id].get("level") != "instance"
-        )
+        # NOTE: convergence requires ALL current expandable nodes (classes
+        # and subclasses) to have been visited — including nodes added during
+        # expansion.  This is checked dynamically in the loop below.
 
         # Convergence thresholds
         PLATEAU_LIMIT = 3   # consecutive productive plateaus to trigger convergence
@@ -1771,6 +1991,24 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         for iteration in range(self.max_iterations):
             iteration_count = iteration + 1
             logger.info(f"Expansion iteration {iteration_count}/{self.max_iterations}")
+
+            # ── Periodic class discovery ──────────────────────────────
+            # When enabled, ask the LLM for new top-level classes at a
+            # fixed interval to broaden the ontology beyond the seed.
+            if (
+                self.class_discovery_interval > 0
+                and iteration_count > 1
+                and (iteration_count - 1) % self.class_discovery_interval == 0
+            ):
+                new_classes = self._discover_new_classes(num_classes=2)
+                if new_classes:
+                    print(f"  {'':>4s}  {'[discovery]':<20s}  {'':>4s}  {len(new_classes):>4d}  "
+                          f"{'':>6s}  {'':>7s}  "
+                          f"{self.ontology_graph.number_of_nodes():>5d}  "
+                          f"{self.ontology_graph.number_of_edges():>5d}  "
+                          f"new classes: {', '.join(new_classes)}")
+                    # Reset stagnation since the graph just grew
+                    stagnation_count = 0
 
             # Run one expansion iteration
             stats = self.expand_ontology()
@@ -1857,8 +2095,24 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
                 elapsed_seconds=time.monotonic() - pipeline_start,
             ))
 
+            # ── Check for retirement event ─────────────────────────
+            expanded_node = stats["node"]
+            if (
+                expanded_node is not None
+                and expanded_node in self.ontology_graph
+                and self.ontology_graph.nodes[expanded_node].get("retired", False)
+            ):
+                retired_level = self.ontology_graph.nodes[expanded_node].get("level", "?")
+                logger.info(f"Node '{expanded_node}' ({retired_level}) retired")
+
             # ── Build status label ────────────────────────────────────
             status_parts: List[str] = []
+            if (
+                expanded_node is not None
+                and expanded_node in self.ontology_graph
+                and self.ontology_graph.nodes[expanded_node].get("retired", False)
+            ):
+                status_parts.append("RETIRED")
             if plateau_count > 0:
                 status_parts.append(f"plateau({plateau_count})")
             if stagnation_count > 0:
@@ -1870,16 +2124,25 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
             # hasn't changed for PLATEAU_LIMIT consecutive productive iterations
             # AND all non-instance nodes from the ORIGINAL seed have been visited.
             if plateau_count >= PLATEAU_LIMIT:
-                all_seed_visited = all(
-                    self.ontology_graph.nodes[node].get("n_visits", 0) >= 1
-                    for node in pre_expansion_expandable
-                    if node in self.ontology_graph.nodes
+                # Dynamically collect all current expandable nodes using
+                # the level_schema, including nodes added during expansion.
+                expandable_level_names = frozenset(
+                    level.name for level in self.level_schema if level.expandable
+                )
+                current_expandable = [
+                    n for n in self.ontology_graph.nodes()
+                    if self.ontology_graph.nodes[n].get("level") in expandable_level_names
+                    and not self.ontology_graph.nodes[n].get("retired", False)
+                ]
+                all_expandable_visited = all(
+                    self.ontology_graph.nodes[n].get("n_visits", 0) >= 1
+                    for n in current_expandable
                 )
 
-                if all_seed_visited:
+                if all_expandable_visited:
                     termination_reason = (
                         f"reward plateau for {plateau_count} productive iterations "
-                        f"and all {len(pre_expansion_expandable)} seed nodes visited"
+                        f"and all {len(current_expandable)} expandable nodes visited"
                     )
                     status = "CONVERGED (plateau)"
                     logger.info(f"Early termination: {termination_reason}")
@@ -2244,6 +2507,8 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         2. **Acceptance Rate** — fraction of generated candidates accepted
         3. **Graph Growth** — cumulative node and edge counts
         4. **Plateau Indicator** — consecutive plateau counter over time
+        5. **Visit Distribution** — histogram of n_visits across expandable nodes
+        6. **Top-10 Visited Nodes** — horizontal bar chart of most-visited nodes
 
         Requires that ``generate_ontology()`` has been run (populates ``self.history``).
 
@@ -2272,8 +2537,8 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         window = min(3, len(plot_df))
         plot_df["reward_ma"] = plot_df["reward"].rolling(window=window, min_periods=1).mean()
 
-        # Create figure with 4 subplots
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        # Create figure with 6 subplots (3 rows × 2 cols)
+        fig, axes = plt.subplots(3, 2, figsize=(14, 15))
         fig.suptitle(
             f"Ontology Generation Convergence — {self.domain}",
             fontsize=16, fontweight="bold", y=0.98,
@@ -2339,7 +2604,73 @@ Return ONLY a valid JSON array with no additional text. Each element must have "
         ax4.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
         ax4.grid(True, alpha=0.3)
 
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        # ── Panel 5: Visit distribution histogram ─────────────
+        ax5 = axes[2, 0]
+        expandable_level_names = frozenset(
+            level.name for level in self.level_schema if level.expandable
+        )
+        visit_counts = [
+            self.ontology_graph.nodes[n].get("n_visits", 0)
+            for n in self.ontology_graph.nodes()
+            if self.ontology_graph.nodes[n].get("level") in expandable_level_names
+        ]
+        if visit_counts:
+            max_visits = max(visit_counts)
+            bins = range(0, max_visits + 2)
+            ax5.hist(visit_counts, bins=bins, color="#7B68EE", alpha=0.8,
+                     edgecolor="#5B4ACE", align="left")
+        ax5.set_xlabel("Number of Visits")
+        ax5.set_ylabel("Number of Nodes")
+        ax5.set_title("Visit Distribution (expandable nodes)")
+        ax5.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax5.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax5.grid(True, alpha=0.3)
+
+        # ── Panel 6: Top-10 most visited nodes ────────────────────
+        ax6 = axes[2, 1]
+        node_visits = [
+            (n, self.ontology_graph.nodes[n].get("n_visits", 0))
+            for n in self.ontology_graph.nodes()
+            if self.ontology_graph.nodes[n].get("n_visits", 0) > 0
+        ]
+        node_visits.sort(key=lambda x: x[1], reverse=True)
+        top_10 = node_visits[:10]
+        if top_10:
+            names = [nv[0][:20] for nv in reversed(top_10)]
+            visits = [nv[1] for nv in reversed(top_10)]
+            level_colors = {
+                self.level_schema[0].name: "#4A90D9",
+            }
+            if len(self.level_schema) > 1:
+                level_colors[self.level_schema[1].name] = "#50C878"
+            if len(self.level_schema) > 2:
+                level_colors[self.level_schema[2].name] = "#FF8C42"
+            bar_colors = [
+                level_colors.get(
+                    self.ontology_graph.nodes[nv[0]].get("level", ""), "#999999"
+                )
+                for nv in reversed(top_10)
+            ]
+            bars = ax6.barh(names, visits, color=bar_colors, alpha=0.85,
+                            edgecolor="gray", linewidth=0.5)
+            for bar, v in zip(bars, visits):
+                ax6.text(bar.get_width() + 0.2, bar.get_y() + bar.get_height() / 2,
+                         str(v), va="center", fontsize=9)
+            from matplotlib.patches import Patch
+            legend_handles = [
+                Patch(facecolor=color, label=level_name)
+                for level_name, color in level_colors.items()
+            ]
+            ax6.legend(handles=legend_handles, loc="lower right", fontsize=9)
+        else:
+            ax6.text(0.5, 0.5, "No visited nodes", ha="center", va="center",
+                     transform=ax6.transAxes, fontsize=12, color="gray")
+        ax6.set_xlabel("Number of Visits")
+        ax6.set_title("Top-10 Most Visited Nodes")
+        ax6.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        ax6.grid(True, alpha=0.3, axis="x")
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
         plt.show()
 
     def visualize_interactive(self, output_path: str = "ontology.html") -> str:
