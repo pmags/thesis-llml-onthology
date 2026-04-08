@@ -1,9 +1,17 @@
 """Shared test fixtures for ontogen tests."""
 
+import importlib
 import pytest
+import sys
 from unittest.mock import create_autospec
+from pathlib import Path
 
-from ontogen.llm_client import ChatGpt
+SRC_PATH = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
+
+ONTOGEN_LLM_CLIENT = importlib.import_module("ontogen.llm_client")
+ChatGpt = ONTOGEN_LLM_CLIENT.ChatGpt
 
 
 @pytest.fixture

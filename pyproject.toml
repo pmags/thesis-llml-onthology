@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-app = ["gradio"]
+app = ["dash", "dash-cytoscape"]
 dev = ["pytest", "pytest-cov", "flake8"]
 notebooks = ["ipykernel", "ipywidgets", "matplotlib", "seaborn"]
 
