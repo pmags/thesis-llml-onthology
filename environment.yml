@@ -37,7 +37,7 @@ dependencies:
   - networkx
   - python-louvain
   - dash
-  - dash-cytoscape
+  - dash_cytoscape
   - pip: 
     - semantic-kernel
     - kglab
