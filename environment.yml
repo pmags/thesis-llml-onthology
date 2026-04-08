@@ -36,7 +36,8 @@ dependencies:
   - chromadb
   - networkx
   - python-louvain
-  - gradio
+  - dash
+  - dash-cytoscape
   - pip: 
     - semantic-kernel
     - kglab

@@ -7,7 +7,7 @@
 This ontology generation system uses a **Top-Down Skeleton + Bottom-Up Population** algorithm to transform a natural language domain description into a hierarchical RDF/OWL ontology. Rather than extracting flat lists of terms and computing expensive pairwise similarities (O(n²) LLM calls), the algorithm:
 
 1. **Seeds** with a multi-level taxonomic skeleton (classes → subclasses → instances) via a single structured LLM prompt.
-2. **Validates** the structure using ~3n targeted similarity checks (parent-child, sibling, cross-branch pairs).
+2. **Validates** the structure using ~n targeted parent-child similarity checks.
 3. **Expands** iteratively using a multi-armed bandit (UCB1) to intelligently select which taxonomy nodes to grow.
 4. **Serializes** to RDF triples using W3C RDF Schema predicates.
 
@@ -17,7 +17,7 @@ The key insight is that **LLMs already understand hierarchies**—we just need t
 
 - **O(n²) similarity calls** for pairwise comparisons (e.g., 100 terms = 5000 LLM calls at ~$0.01 each = $50).
 - **Flat output** (all peers under one cluster label) by explicitly requesting multi-level structure.
-- **Weak validation** by checking only the relationships that matter: direct parent-child edges, siblings, and cross-taxonomy links.
+- **Weak validation** by checking only the relationships that matter: direct parent-child edges.
 
 ### Pipeline Diagram
 
@@ -30,9 +30,8 @@ Domain Input
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
-│ Phase 2: Structural Validation (~3n)    │
-│ Check parent-child, sibling,            │
-│ cross-branch edges; prune weak ones    │
+│ Phase 2: Structural Validation (~n)      │
+│ Check parent-child edges; prune weak ones │
 └─────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────┐
@@ -182,21 +181,15 @@ onto = Ontology(domain="MyDomain", level_schema=custom_schema)
 
 ## 4. Phase 2 — Structural Validation
 
-### Strategy: ~3n Validation Instead of n²
+### Strategy: ~n Validation Instead of n²
 
-Building an RDF graph from the seed creates edges that may be weak or incorrect. Rather than validate all $\binom{n}{2}$ pairs, we validate ~3n targeted pairs:
+Building an RDF graph from the seed creates edges that may be weak or incorrect. Rather than validate all $\binom{n}{2}$ pairs, we validate one pair per edge (~n LLM calls):
 
 **Parent-Child Pairs**: Every edge in the seed tree.
 - Example: Is `Vulcan` really a subclass of `Species`?
 - Expected to be strong (high similarity).
 
-**Sibling Pairs**: Terms sharing the same parent.
-- Example: Are `Vulcan` and `Klingon` both species?
-- Expected to be moderate (they share a category).
-
-**Cross-Branch Pairs**: Selected pairs from different top-level classes.
-- Example: Is `Spock` (instance of Vulcan) also relevant to `Officer` (different class hierarchy)?
-- Expected to be weak or moderate (supports cross-taxonomy typing).
+> **Design note**: Earlier versions also evaluated sibling and cross-branch pairs during validation, but these checks were purely diagnostic — they incremented counters without modifying the graph. Sibling and cross-branch evaluation was removed to save LLM tokens. Cross-branch linking is handled during the expansion phase (Phase 3) via `_check_cross_branch_links_batch()`, which actually adds edges to the graph.
 
 ### Similarity Evaluation
 
@@ -208,15 +201,13 @@ All pairs are evaluated using `_get_similarity_cached(term_a, term_b, descriptio
 
 ### Pruning Rules
 
-Weak edges are removed based on category-specific thresholds:
+Parent-child edges with similarity below the threshold are removed from the graph:
 
 | Pair Category | Threshold | Interpretation |
 |---------------|-----------|-----------------|
-| **Parent-Child** | 50% | Child must be fairly distinct from parent (e.g., `Vulcan` vs `Species`). Too high → overly strict. Too low → weak children kept. |
-| **Sibling** | 30% | Siblings can be moderately different; low threshold allows diversity within a category. |
-| **Cross-Branch** | 70% | Cross-taxonomy links are rare; require high confidence. |
+| **Parent-Child** | `similarity_threshold` (default 50%) | Child must be related to parent (e.g., `Vulcan` vs `Species`). Too high → overly strict. Too low → weak children kept. |
 
-Edges below their threshold are removed from the graph. Nodes that become isolated (degree = 0) are flagged as orphaned and logged.
+Nodes that become isolated (degree = 0) after pruning are flagged as orphaned and logged.
 
 ### Implementation
 
@@ -226,12 +217,7 @@ Returns a summary dictionary:
 
 ```python
 {
-    "parent_child_checked": 12,
-    "parent_child_pruned": 2,
-    "sibling_candidates": 8,
-    "sibling_flagged": 1,
-    "cross_branch_candidates": 3,
-    "cross_branch_flagged": 1,
+    "edges_pruned": 2,
     "orphaned_nodes": 0,
 }
 ```
@@ -247,8 +233,12 @@ After validating the seed, we **expand** the ontology by generating new subclass
 The problem is a multi-armed bandit:
 
 - **Arms** = nodes in the taxonomy (eligible for expansion).
-- **Reward** = average similarity of newly accepted candidates under that node.
+- **Reward** = sum of accepted-candidate similarities divided by total generated candidates for that node.
 - **Goal** = balance exploration (try less-visited nodes) and exploitation (expand promising nodes).
+
+For interactive applications, the same expansion mechanics can also be driven
+manually by selecting a specific expandable node instead of asking UCB1 to pick
+one automatically.
 
 ### UCB1 Selection
 
@@ -258,7 +248,7 @@ $$\text{UCB1}_i = \bar{x}_i + c \sqrt{\frac{\ln N}{n_i}}$$
 
 Where:
 
-- $\bar{x}_i$ = mean reward for node $i$ (average of similarities of accepted candidates).
+- $\bar{x}_i$ = mean reward for node $i$ across visits, where each visit reward is accepted similarity mass divided by generated candidates.
 - $c$ = exploration constant (default: 1.41, $\sqrt{2}$).
 - $N$ = total expansion iterations so far.
 - $n_i$ = number of times node $i$ has been expanded.
@@ -275,8 +265,20 @@ Where:
 2. **Generate**: Prompt LLM for new subclasses (if node is a class) or instances (if subclass).
 3. **Validate**: Check similarity of candidates to parent node (threshold: 50%).
 4. **Integrate**: Add accepted candidates to the graph with `n_visits=0`, `total_reward=0.0`.
-5. **Update**: Compute mean similarity of accepted candidates as reward; update the selected node's bandit stats.
-6. **Repeat**: Until max iterations or plateau detected.
+5. **Update**: Compute accepted similarity mass divided by generated candidates as reward; update the selected node's bandit stats.
+6. **Repeat**: Until max iterations or plateau detected after at least one real revisit.
+
+### Manual Expansion Path
+
+The package also supports manual node expansion through `expand_node(node_id)`.
+That path reuses the same candidate generation, validation, graph insertion,
+cross-branch linking, and bandit reward updates as automatic UCB1 expansion;
+the only difference is the selection rule.
+
+Manual expansion is intentionally a one-way mode per `Ontology` instance. Once
+manual expansion starts, that instance cannot switch back to automatic UCB1
+selection. Interactive apps should create a fresh `Ontology` instance whenever a
+user wants to move from manual exploration back to automatic expansion.
 
 ### Candidate Generation
 
@@ -325,7 +327,7 @@ graph.add_edge(parent_node, candidate_name,
 Expansion halts if:
 
 - `max_iterations` (default: 50) is reached.
-- **Plateau detected**: Recent iterations (last 5) show low average acceptance rates or low similarity scores, indicating the domain is saturated.
+- **Plateau detected**: Productive-iteration rewards stay within a small delta for several consecutive productive iterations, all current expandable non-retired nodes have been visited, and at least one expandable node has been revisited. This avoids labeling a cold-start-only run as converged.
 
 ---
 
@@ -416,7 +418,7 @@ Example: `James Kirk` → `James_Kirk`; `Officer (Rank)` → `Officer_%28Rank%29
 | Phase | LLM Calls | Rationale |
 |-------|-----------|-----------|
 | **Seed** | O(1) | Single structured prompt returns entire skeleton. |
-| **Validation** | O(n) | Check ~3 pairs per node (~3n total). Cached lookups avoid duplicates. |
+| **Validation** | O(n) | Check 1 pair per edge (~n total). Cached lookups avoid duplicates. |
 | **Expansion** | O(k × m) | k = `max_iterations`, m = `candidates_per_iteration`. Each expansion generates m candidates and validates them. |
 | **Serialization** | O(0) | No LLM calls; local graph traversal. |
 | **Total** | O(n + k×m) | **Sub-quadratic** compared to O(n²) pairwise comparisons. |
@@ -425,11 +427,11 @@ Example: `James Kirk` → `James_Kirk`; `Officer (Rank)` → `Officer_%28Rank%29
 
 Assume:
 - Seed: 3 classes, ~15 total nodes after seed.
-- Validation: ~45 pairs (3 × 15).
+- Validation: ~15 pairs (1 per edge).
 - Expansion: 50 iterations × 2 candidates/iteration = 100 LLM calls (to generate + validate).
-- **Total: ~145 LLM calls** vs. **1225 pairs** for O(n²) approach.
+- **Total: ~115 LLM calls** vs. **1225 pairs** for O(n²) approach.
 
-**Cost**: ~$1.45 at $0.01/call vs. ~$12.25 for naive pairwise.
+**Cost**: ~$1.15 at $0.01/call vs. ~$12.25 for naive pairwise.
 
 ---
 
@@ -517,3 +519,22 @@ All downstream phases automatically adjust:
 - [W3C RDF Schema Specification](https://www.w3.org/TR/rdf-schema/)
 - [W3C Semantic Web](https://www.w3.org/2001/sw/)
 - Auer et al. (2007). "The Linked Open Data Cloud". Available online.
+
+
+What it is doing is using:
+
+N
+=
+∑
+a
+∈
+A
+n
+(
+a
+)
+N= 
+a∈A
+∑
+​
+ n(a)

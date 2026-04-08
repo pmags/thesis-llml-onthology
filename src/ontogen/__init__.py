@@ -6,11 +6,9 @@ from a user-specified domain using Large Language Models (LLMs).
 """
 
 from ontogen.llm_client import ChatGpt
-from ontogen.clustering import create_distance_matrix, build_similarity_graph
+from ontogen.models import OntologyLevel, DEFAULT_LEVEL_SCHEMA
 from ontogen.ontology import (
     Ontology,
-    OntologyLevel,
-    DEFAULT_LEVEL_SCHEMA,
     ExpansionRecord,
     PhaseRecord,
     GenerationHistory,
@@ -23,7 +21,5 @@ __all__ = [
     "DEFAULT_LEVEL_SCHEMA",
     "ExpansionRecord",
     "PhaseRecord",
-    "GenerationHistory",
-    "create_distance_matrix",
-    "build_similarity_graph",
+    "GenerationHistory"
 ]

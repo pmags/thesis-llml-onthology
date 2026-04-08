@@ -10,7 +10,7 @@ Automatically generate hierarchical RDF/OWL ontologies from a user-specified dom
 
 - **Python ≥ 3.10**
 - **Conda** (recommended) or pip
-- **OpenAI API key** (set as `OPENAI_API_KEY` environment variable)
+- **OpenAI API key** or **IAEDU agent credentials**
 
 ### Setup
 
@@ -31,9 +31,14 @@ Automatically generate hierarchical RDF/OWL ontologies from a user-specified dom
    pip install -e '.[dev,notebooks,app]'
    ```
 
-4. **Set your OpenAI API key:**
+4. **Set your provider credentials:**
    ```bash
    export OPENAI_API_KEY=<your-api-key>
+
+   # Optional IAEDU backend
+   export IAEDU_API_KEY=<your-iaedu-api-key>
+   export IAEDU_ENDPOINT=https://api.iaedu.pt/agent-chat//api/v1/agent/<agent-id>/stream
+   export IAEDU_CHANNEL_ID=<your-channel-id>
    ```
 
 ## Quick Start
@@ -43,10 +48,58 @@ Generate an ontology for a domain in a few lines of code:
 ```python
 from ontogen import ChatGpt, Ontology
 
-# Initialize the LLM agent
+# Initialize the OpenAI-backed LLM agent
 agent = ChatGpt()
 
 # Create and generate the ontology
+onto = Ontology(domain="Star Trek", agent=agent)
+onto.generate_ontology()
+```
+
+If you want an interactive app flow, the same `Ontology` instance can also
+expand a user-selected node directly:
+
+```python
+from ontogen import ChatGpt, Ontology
+
+agent = ChatGpt()
+onto = Ontology(domain="Star Trek", agent=agent)
+
+onto.seed = {
+   "domain": "Star Trek",
+   "taxonomy": [
+      {
+         "class": "Species",
+         "description": "Sentient species",
+         "subclasses": [],
+      }
+   ],
+}
+onto.create_seed_ontology()
+
+expandable_nodes = onto.list_expandable_nodes(include_retired=True)
+stats = onto.expand_node(expandable_nodes[0])
+print(stats)
+```
+
+Manual expansion uses the same generation and validation pipeline as UCB1, but
+it is a one-way choice per `Ontology` instance: after `expand_node()` is used,
+that instance cannot switch back to automatic `generate_ontology()` or
+`expand_ontology()`. Create a new `Ontology` instance if the user wants to go
+back to automatic mode.
+
+To use IAEDU with the same ontology code path:
+
+```python
+from ontogen import ChatGpt, Ontology
+
+agent = ChatGpt(
+   provider="iaedu",
+   api_key="<your-iaedu-api-key>",
+   endpoint="https://api.iaedu.pt/agent-chat//api/v1/agent/<agent-id>/stream",
+   channel_id="<your-channel-id>",
+)
+
 onto = Ontology(domain="Star Trek", agent=agent)
 onto.generate_ontology()
 ```
@@ -79,9 +132,16 @@ onto = Ontology(domain="Star Trek", agent=agent, level_schema=custom_levels)
 ```
 src/ontogen/                 # Core package
 ├── __init__.py              # Public API exports
-├── ontology.py              # Ontology class: seed, expand, build, serialize
+├── ontology.py              # Public facade and pipeline orchestrator
+├── seed.py                  # Phase 1-2 seed generation and seed graph creation
+├── validation.py            # Similarity cache and structural validation
+├── expansion.py             # UCB1-guided iterative expansion
+├── serialization.py         # RDF graph construction and serialization
+├── visualization.py         # Notebook and HTML visualization helpers
+├── progress.py              # Shared console progress formatting
 ├── llm_client.py            # ChatGpt LLM wrapper
-└── clustering.py            # Graph building and analysis
+├── models.py                # Ontology schema models
+└── expansion_models.py      # Phase and iteration history records
 
 app/                         # Gradio web UI
 ├── __init__.py
@@ -110,13 +170,25 @@ pyproject.toml              # Package configuration
 README.md                   # This file
 ```
 
+## Internal Architecture
+
+`Ontology` remains the public entrypoint, but the internal implementation is split by responsibility through mixins so each phase is easier to navigate and debug.
+
+- `SeedMixin` in `seed.py` handles schema helpers, prompt construction, and seed graph creation.
+- `ValidationMixin` in `validation.py` handles similarity caching and parent-child structural pruning.
+- `ExpansionMixin` in `expansion.py` handles both manual and UCB1-driven expansion, acceptance tracking, and convergence logic, including a revisit guard that prevents cold-start-only runs from being marked as plateau-converged.
+- `SerializationMixin` in `serialization.py` handles RDF URI sanitization, triple creation, and serialization.
+- `VisualizationMixin` in `visualization.py` handles notebook plots and interactive graph rendering.
+
+This keeps the external API stable (`from ontogen import Ontology`) while allowing the phase implementations to evolve independently.
+
 ## Algorithm Overview
 
 The generation process follows four phases:
 
 1. **Structured Seed**: LLM generates a 3-level taxonomic skeleton (classes → subclasses → instances) as structured JSON.
 2. **Validation**: Pairwise LLM similarity evaluation (~3n calls) pruning weak structural edges.
-3. **Iterative Expansion**: UCB1 multi-armed bandit selects nodes to expand, generating new subclasses/instances with validation and cross-branch linking.
+3. **Iterative Expansion**: Nodes can be expanded automatically via UCB1 or manually via `expand_node()`, both using the same candidate-generation and validation pipeline. Plateau convergence is only eligible after at least one actual revisit of an expandable node.
 4. **RDF Serialization**: The ontology is mapped to standard RDF predicates (`rdfs:Class`, `rdfs:subClassOf`, `rdf:type`) and serialized to Turtle format.
 
 For detailed algorithm documentation, see [docs/algorithm.md](docs/algorithm.md).

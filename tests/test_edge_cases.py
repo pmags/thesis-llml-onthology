@@ -35,6 +35,7 @@ def custom_2_level_schema():
     return [
         OntologyLevel(
             name="class",
+            plural_name="classes",
             is_rdf_class=True,
             expandable=True,
             seed_key="class",
@@ -43,6 +44,7 @@ def custom_2_level_schema():
         ),
         OntologyLevel(
             name="instance",
+            plural_name="instances",
             is_rdf_class=False,
             expandable=False,
             seed_key="term",
@@ -58,6 +60,7 @@ def custom_4_level_schema():
     return [
         OntologyLevel(
             name="domain",
+            plural_name="domains",
             is_rdf_class=True,
             expandable=True,
             seed_key="domain",
@@ -66,6 +69,7 @@ def custom_4_level_schema():
         ),
         OntologyLevel(
             name="category",
+            plural_name="categories",
             is_rdf_class=True,
             expandable=True,
             seed_key="category",
@@ -74,6 +78,7 @@ def custom_4_level_schema():
         ),
         OntologyLevel(
             name="topic",
+            plural_name="topics",
             is_rdf_class=True,
             expandable=True,
             seed_key="topic",
@@ -82,6 +87,7 @@ def custom_4_level_schema():
         ),
         OntologyLevel(
             name="item",
+            plural_name="items",
             is_rdf_class=False,
             expandable=False,
             seed_key="item",
@@ -246,6 +252,51 @@ class TestMalformedLLMResponses:
         assert candidates[0]["term"] == "Spock"
         assert candidates[0]["description"] == "Officer"
 
+    def test_candidates_gen_uses_custom_level_plural_in_prompt(
+        self,
+        mock_agent_for_edge_cases,
+    ):
+        """Candidate-generation prompt should use the child level plural label."""
+        custom_schema = [
+            OntologyLevel(
+                name="domain",
+                plural_name="domains",
+                seed_key="domain",
+                children_key="categories",
+            ),
+            OntologyLevel(
+                name="category",
+                plural_name="categories",
+                relation_to_parent="subClassOf",
+                seed_key="category",
+                children_key=None,
+            ),
+        ]
+        mock_agent_for_edge_cases.chat.return_value = "[]"
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_schema,
+        )
+        ont.seed = {
+            "domain": "Science",
+            "taxonomy": [
+                {
+                    "domain": "Physics",
+                    "description": "Study of matter",
+                    "categories": [],
+                }
+            ],
+        }
+        ont.create_seed_ontology()
+
+        candidates = ont._generate_candidates("Physics")
+
+        assert candidates == []
+        prompt = mock_agent_for_edge_cases.chat.call_args.kwargs["input"]
+        assert "generate 20 new categories" in prompt.lower()
+        assert "already has these categories" in prompt.lower()
+
     def test_similarity_response_with_non_numeric_value(
         self, mock_agent_for_edge_cases, caplog
     ):
@@ -289,7 +340,8 @@ class TestMalformedLLMResponses:
             "Subclass1", term="Subclass1", description="A subclass", level="subclass",
             n_visits=0, total_reward=0.0,
         )
-        ont.ontology_graph.add_edge("Class1", "Subclass1", relation="subClassOf")
+        ont.ontology_graph.add_edge(
+            "Class1", "Subclass1", relation="subClassOf")
 
         # Parallel pre-computation catches the exception and defaults to 0.0;
         # validation should complete without raising.
@@ -439,7 +491,8 @@ class TestCustomLevelSchemas:
                 ],
             }
         )
-        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, level_schema=custom_schema)
+        ont = Ontology(domain="TestDomain",
+                       agent=mock_agent_for_edge_cases, level_schema=custom_schema)
         seed = ont.generate_initial_terms()
         assert seed is not None
         ont.create_seed_ontology()
@@ -448,7 +501,8 @@ class TestCustomLevelSchemas:
         # Check that custom predicates are used
         ttl_output = rdf_graph.serialize(format="turtle")
         # Should contain reference to custom predicates (exact format depends on rdflib)
-        assert "custom" in str(ttl_output) or "contains" in str(ttl_output) or len(rdf_graph) > 0
+        assert "custom" in str(ttl_output) or "contains" in str(
+            ttl_output) or len(rdf_graph) > 0
 
     def test_non_expandable_intermediate_level(self, mock_agent_for_edge_cases):
         """Non-expandable intermediate level should be skipped by UCB1."""
@@ -498,7 +552,8 @@ class TestCustomLevelSchemas:
                 ],
             }
         )
-        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, level_schema=custom_schema)
+        ont = Ontology(domain="TestDomain",
+                       agent=mock_agent_for_edge_cases, level_schema=custom_schema)
         seed = ont.generate_initial_terms()
         assert seed is not None
         ont.create_seed_ontology()
@@ -552,15 +607,18 @@ class TestGraphEdgeCases:
                 {"term": "NewSubclass", "description": "A new subclass"}
             ]
         )
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 85.0}
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 85.0}
         stats = ont.expand_ontology()
         # Should have some candidates accepted
         assert stats is not None
 
     def test_full_pruning_orphans_all_nodes(self, mock_agent_for_edge_cases, caplog):
         """Pruning all edges orphans non-root nodes; should log orphans."""
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 10.0}  # Very low
-        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=50)
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 10.0}  # Very low
+        ont = Ontology(domain="TestDomain",
+                       agent=mock_agent_for_edge_cases, similarity_threshold=50)
         ont.seed = {
             "domain": "Test",
             "taxonomy": [
@@ -633,8 +691,10 @@ class TestGraphEdgeCases:
     def test_graph_with_all_equivalence_scores(self, mock_agent_for_edge_cases):
         """All similarity scores at threshold boundary should keep edges (>= not >)."""
         threshold = 0.5
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 50.0}  # Exactly threshold * 100
-        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=threshold)
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 50.0}  # Exactly threshold * 100
+        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases,
+                       similarity_threshold=threshold)
         ont.seed = {
             "domain": "Test",
             "taxonomy": [
@@ -704,7 +764,8 @@ class TestUnicodeAndSpecialChars:
         """Term with emoji should sanitize correctly."""
         ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
         ont.ontology_graph = nx.DiGraph()
-        ont.ontology_graph.add_node("Spock 🖖", level=0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Spock 🖖", level=0, is_rdf_class=True, expandable=True)
 
         # Sanitization should remove emoji
         uri = ont._sanitize_uri("Spock 🖖")
@@ -742,11 +803,13 @@ class TestUnicodeAndSpecialChars:
         """HTML entities in descriptions should not cause injection."""
         ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
         ont.ontology_graph = nx.DiGraph()
-        ont.ontology_graph.add_node("Node1", level=0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node1", level=0, is_rdf_class=True, expandable=True)
         ont.ontology_graph.add_node(
             "Node2", level=1, is_rdf_class=True, expandable=True
         )
-        ont.ontology_graph.add_edge("Node1", "Node2", relation="rdfs:subClassOf")
+        ont.ontology_graph.add_edge(
+            "Node1", "Node2", relation="rdfs:subClassOf")
 
         # Should handle HTML safely
         result = ont._get_similarity_cached(
@@ -819,7 +882,8 @@ class TestStressAndBoundary:
             )
 
         mock_agent_for_edge_cases.chat.side_effect = mock_chat
-        ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, max_iterations=0)
+        ont = Ontology(domain="TestDomain",
+                       agent=mock_agent_for_edge_cases, max_iterations=0)
         rdf_graph = ont.generate_ontology()
         assert rdf_graph is not None
         # Should have at least the seed nodes
@@ -855,7 +919,8 @@ class TestStressAndBoundary:
             )
 
         mock_agent_for_edge_cases.chat.side_effect = mock_chat
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 30.0}  # Low, below threshold
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 30.0}  # Low, below threshold
 
         ont = Ontology(
             domain="TestDomain",
@@ -872,8 +937,10 @@ class TestStressAndBoundary:
             domain="TestDomain", agent=mock_agent_for_edge_cases, exploration_constant=0.0
         )
         ont.ontology_graph = nx.DiGraph()
-        ont.ontology_graph.add_node("Node1", level=0, n_visits=10, total_reward=80.0, is_rdf_class=True, expandable=True)
-        ont.ontology_graph.add_node("Node2", level=0, n_visits=5, total_reward=50.0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node1", level=0, n_visits=10, total_reward=80.0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node2", level=0, n_visits=5, total_reward=50.0, is_rdf_class=True, expandable=True)
 
         # With exploration_constant=0, should always pick highest reward arm
         selected = ont._select_node_ucb1()
@@ -888,8 +955,10 @@ class TestStressAndBoundary:
         )
         ont.ontology_graph = nx.DiGraph()
         # Node1 visited many times, high reward; Node2 visited once, low reward
-        ont.ontology_graph.add_node("Node1", level=0, n_visits=100, total_reward=9000.0, is_rdf_class=True, expandable=True)
-        ont.ontology_graph.add_node("Node2", level=0, n_visits=1, total_reward=10.0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node1", level=0, n_visits=100, total_reward=9000.0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node2", level=0, n_visits=1, total_reward=10.0, is_rdf_class=True, expandable=True)
 
         # With high exploration constant, should favor less-visited nodes
         selected = ont._select_node_ucb1()
@@ -904,8 +973,10 @@ class TestStressAndBoundary:
             domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=0
         )
         ont_permissive.ontology_graph = nx.DiGraph()
-        ont_permissive.ontology_graph.add_node("Parent", level=0, is_rdf_class=True, expandable=True)
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 1.0}  # Even 1% is accepted
+        ont_permissive.ontology_graph.add_node(
+            "Parent", level=0, is_rdf_class=True, expandable=True)
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 1.0}  # Even 1% is accepted
         candidates = [{"term": "Child", "description": "A child"}]
         validated = ont_permissive._validate_candidates("Parent", candidates)
         # At threshold 0, should accept if similarity >= 0
@@ -916,8 +987,10 @@ class TestStressAndBoundary:
             domain="TestDomain", agent=mock_agent_for_edge_cases, similarity_threshold=100
         )
         ont_strict.ontology_graph = nx.DiGraph()
-        ont_strict.ontology_graph.add_node("Parent", level=0, is_rdf_class=True, expandable=True)
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 99.0}  # Even 99% rejected
+        ont_strict.ontology_graph.add_node(
+            "Parent", level=0, is_rdf_class=True, expandable=True)
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 99.0}  # Even 99% rejected
         candidates = [{"term": "Child", "description": "A child"}]
         validated = ont_strict._validate_candidates("Parent", candidates)
         # At threshold 100, should reject all
@@ -937,10 +1010,12 @@ class TestCacheAndDeterminism:
         ont1 = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
         ont2 = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
 
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 75.0}
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 75.0}
         result1 = ont1._get_similarity_cached("A", "B")
 
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 25.0}
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 25.0}
         result2 = ont2._get_similarity_cached("A", "B")
 
         # Should call LLM twice (separate caches)
@@ -950,14 +1025,17 @@ class TestCacheAndDeterminism:
         """Cache should remain valid after graph mutations."""
         ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
         ont.ontology_graph = nx.DiGraph()
-        ont.ontology_graph.add_node("Node1", level=0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node1", level=0, is_rdf_class=True, expandable=True)
 
         # Cache a similarity result
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 80.0}
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 80.0}
         result1 = ont._get_similarity_cached("A", "B")
 
         # Mutate graph
-        ont.ontology_graph.add_node("Node2", level=1, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node2", level=1, is_rdf_class=True, expandable=True)
 
         # Cache should still have the same result
         result2 = ont._get_similarity_cached("A", "B")
@@ -966,18 +1044,22 @@ class TestCacheAndDeterminism:
     def test_deterministic_results_with_fixed_seed(self, mock_agent_for_edge_cases):
         """Fixed random seeds should produce deterministic results."""
         random.seed(42)
-        ont1 = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, exploration_constant=10.0)
+        ont1 = Ontology(
+            domain="TestDomain", agent=mock_agent_for_edge_cases, exploration_constant=10.0)
         ont1.ontology_graph = nx.DiGraph()
         for i in range(5):
-            ont1.ontology_graph.add_node(f"Node{i}", level=0, n_visits=0, total_reward=0.0, is_rdf_class=True, expandable=True)
+            ont1.ontology_graph.add_node(
+                f"Node{i}", level=0, n_visits=0, total_reward=0.0, is_rdf_class=True, expandable=True)
 
         selected1 = [ont1._select_node_ucb1() for _ in range(3)]
 
         random.seed(42)
-        ont2 = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases, exploration_constant=10.0)
+        ont2 = Ontology(
+            domain="TestDomain", agent=mock_agent_for_edge_cases, exploration_constant=10.0)
         ont2.ontology_graph = nx.DiGraph()
         for i in range(5):
-            ont2.ontology_graph.add_node(f"Node{i}", level=0, n_visits=0, total_reward=0.0, is_rdf_class=True, expandable=True)
+            ont2.ontology_graph.add_node(
+                f"Node{i}", level=0, n_visits=0, total_reward=0.0, is_rdf_class=True, expandable=True)
 
         selected2 = [ont2._select_node_ucb1() for _ in range(3)]
 
@@ -987,7 +1069,8 @@ class TestCacheAndDeterminism:
     def test_cache_key_sorting_consistency(self, mock_agent_for_edge_cases):
         """Cache keys should be order-agnostic (sorted)."""
         ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
-        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {"similarity": 75.0}
+        mock_agent_for_edge_cases.get_similarity_with_descriptions.return_value = {
+            "similarity": 75.0}
 
         # Call with terms in different order
         result1 = ont._get_similarity_cached("Zebra", "Apple")
@@ -1016,7 +1099,8 @@ class TestLLMIntegrationRobustness:
 
     def test_seed_generation_timeout_behavior(self, mock_agent_for_edge_cases):
         """Timeout in seed generation should be caught and logged."""
-        mock_agent_for_edge_cases.chat.side_effect = TimeoutError("API timeout")
+        mock_agent_for_edge_cases.chat.side_effect = TimeoutError(
+            "API timeout")
         ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
 
         result = ont.generate_initial_terms()
@@ -1077,7 +1161,8 @@ class TestSerializationAndVisualizationRobustness:
         """Terms sanitizing to same URI should be handled."""
         ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
         ont.ontology_graph = nx.DiGraph()
-        ont.ontology_graph.add_node("Spock", level=0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Spock", level=0, is_rdf_class=True, expandable=True)
         ont.ontology_graph.add_node(
             "spock ", level=1, is_rdf_class=True, expandable=True
         )  # Trailing space
@@ -1129,7 +1214,8 @@ class TestSerializationAndVisualizationRobustness:
         """Invalid format should raise ValueError."""
         ont = Ontology(domain="TestDomain", agent=mock_agent_for_edge_cases)
         ont.ontology_graph = nx.DiGraph()
-        ont.ontology_graph.add_node("Node1", level=0, is_rdf_class=True, expandable=True)
+        ont.ontology_graph.add_node(
+            "Node1", level=0, is_rdf_class=True, expandable=True)
         ont.build_ontology()
 
         with pytest.raises(ValueError):
@@ -1208,8 +1294,10 @@ class TestCustomHierarchyParallelAndConvergence:
             "Velocity", term="Velocity", description="Rate of position change",
             level="item", n_visits=0, total_reward=0.0,
         )
-        ont.ontology_graph.add_edge("Physics", "Mechanics", relation="subClassOf")
-        ont.ontology_graph.add_edge("Mechanics", "Kinematics", relation="subClassOf")
+        ont.ontology_graph.add_edge(
+            "Physics", "Mechanics", relation="subClassOf")
+        ont.ontology_graph.add_edge(
+            "Mechanics", "Kinematics", relation="subClassOf")
         ont.ontology_graph.add_edge("Kinematics", "Velocity", relation="type")
 
         summary = ont.validate_structure()
@@ -1323,7 +1411,7 @@ class TestCustomHierarchyParallelAndConvergence:
     def test_convergence_fires_when_all_custom_expandable_visited(
         self, custom_4_level_schema, mock_agent_for_edge_cases
     ):
-        """Convergence fires when ALL expandable nodes in a 4-level schema are visited."""
+        """Convergence fires when all expandable nodes are visited and one is revisited."""
         ont = Ontology(
             domain="Science",
             agent=mock_agent_for_edge_cases,
@@ -1338,11 +1426,12 @@ class TestCustomHierarchyParallelAndConvergence:
 
         def create_and_mark_all_visited():
             original_create()
-            # Mark ALL expandable nodes as visited
+            revisit_marked = False
             for node in ont.ontology_graph.nodes():
                 level = ont.ontology_graph.nodes[node].get("level")
                 if level != "item":  # item is the only non-expandable level
-                    ont.ontology_graph.nodes[node]["n_visits"] = 1
+                    ont.ontology_graph.nodes[node]["n_visits"] = 2 if not revisit_marked else 1
+                    revisit_marked = True
 
         def mock_expand():
             call_count[0] += 1
@@ -1383,18 +1472,18 @@ class TestCustomHierarchyParallelAndConvergence:
                     with patch.object(ont, "serialize_ontology", return_value="# TTL"):
                         ont.generate_ontology()
 
-        # Because ALL expandable nodes were visited and reward plateaus,
+        # Because all expandable nodes were visited, at least one was revisited,
+        # and reward plateaus,
         # convergence should have triggered before max_iterations.
         assert ont.history is not None
         assert ont.history.total_iterations < 20
         assert ont.history.early_terminated is True
         assert "plateau" in ont.history.termination_reason
 
-    def test_cross_branch_pairs_use_root_level_from_schema(
+    def test_validation_pairs_only_parent_child_with_custom_schema(
         self, custom_4_level_schema, mock_agent_for_edge_cases
     ):
-        """Cross-branch pairs should use the root level name from the schema,
-        not hardcoded 'class'."""
+        """Validation pairs should only contain parent-child pairs regardless of schema."""
         ont = Ontology(
             domain="Science",
             agent=mock_agent_for_edge_cases,
@@ -1418,13 +1507,16 @@ class TestCustomHierarchyParallelAndConvergence:
             "Organic", term="Organic", description="Carbon compounds",
             level="category", n_visits=0, total_reward=0.0,
         )
-        ont.ontology_graph.add_edge("Physics", "Mechanics", relation="subClassOf")
-        ont.ontology_graph.add_edge("Chemistry", "Organic", relation="subClassOf")
+        ont.ontology_graph.add_edge(
+            "Physics", "Mechanics", relation="subClassOf")
+        ont.ontology_graph.add_edge(
+            "Chemistry", "Organic", relation="subClassOf")
 
         pairs = ont._generate_validation_pairs()
-        cross_branch = [p for p in pairs if p["category"] == "cross-branch"]
-        # Should have at least one cross-branch pair derived from root "domain" nodes
-        assert len(cross_branch) >= 1
+        categories = {p["category"] for p in pairs}
+        assert categories == {
+            "parent-child"}, "Should only have parent-child pairs"
+        assert len(pairs) == 2, "Should have one pair per edge"
 
     def test_cross_branch_links_with_custom_root_level(
         self, custom_4_level_schema, mock_agent_for_edge_cases
@@ -1455,7 +1547,8 @@ class TestCustomHierarchyParallelAndConvergence:
             "Energy", term="Energy", description="Capacity to do work",
             level="item", n_visits=0, total_reward=0.0,
         )
-        ont.ontology_graph.add_edge("Physics", "Mechanics", relation="subClassOf")
+        ont.ontology_graph.add_edge(
+            "Physics", "Mechanics", relation="subClassOf")
         ont.ontology_graph.add_edge("Mechanics", "Energy", relation="type")
 
         ont._check_cross_branch_links("Energy", "Capacity to do work")
@@ -1500,7 +1593,8 @@ class TestBatchCrossBranchLinking:
             "Vulcans", term="Vulcans", description="Logical species",
             level="subclass", n_visits=0, total_reward=0.0,
         )
-        ont.ontology_graph.add_edge("Species", "Vulcans", relation="subClassOf")
+        ont.ontology_graph.add_edge(
+            "Species", "Vulcans", relation="subClassOf")
         ont.ontology_graph.add_node(
             "Spock", term="Spock", description="Half-Vulcan officer",
             level="instance", n_visits=0, total_reward=0.0,
@@ -1544,7 +1638,8 @@ class TestBatchCrossBranchLinking:
         )
         ont.ontology_graph.add_edge("A", "A1", relation="subClassOf")
 
-        ont._check_cross_branch_links_batch([{"term": "A1", "description": "Sub of A"}])
+        ont._check_cross_branch_links_batch(
+            [{"term": "A1", "description": "Sub of A"}])
 
         # Should link to B (other class) but NOT to A (own ancestor)
         assert ont.ontology_graph.has_edge("A1", "B")
@@ -1578,7 +1673,8 @@ class TestBatchCrossBranchLinking:
         )
         ont.ontology_graph.add_edge("C1", "X", relation="subClassOf")
 
-        ont._check_cross_branch_links_batch([{"term": "X", "description": "Instance"}])
+        ont._check_cross_branch_links_batch(
+            [{"term": "X", "description": "Instance"}])
 
         assert not ont.ontology_graph.has_edge("X", "C2")
 
@@ -1669,6 +1765,40 @@ class TestClassDiscovery:
         assert added == ["Biology"]
         assert ont.ontology_graph.nodes["Biology"]["level"] == "domain"
 
+    def test_discover_prompt_uses_custom_root_plural(self, mock_agent_for_edge_cases):
+        """Discovery prompt should use the root level plural label."""
+        custom_schema = [
+            OntologyLevel(
+                name="category",
+                plural_name="categories",
+                is_rdf_class=True,
+                expandable=True,
+                seed_key="category",
+                children_key=None,
+            ),
+        ]
+        mock_agent_for_edge_cases.chat.return_value = "[]"
+        ont = Ontology(
+            domain="Science",
+            agent=mock_agent_for_edge_cases,
+            level_schema=custom_schema,
+        )
+        ont.ontology_graph.add_node(
+            "Physics",
+            term="Physics",
+            description="Study of matter",
+            level="category",
+            n_visits=1,
+            total_reward=0.5,
+        )
+
+        added = ont._discover_new_classes(num_classes=1)
+
+        assert added == []
+        prompt = mock_agent_for_edge_cases.chat.call_args.kwargs["input"]
+        assert "new top-level categories" in prompt.lower()
+        assert "existing categories" in prompt.lower()
+
     def test_discovery_interval_parameter(self, mock_agent_for_edge_cases):
         """class_discovery_interval=0 (default) should disable discovery."""
         ont = Ontology(domain="Test", agent=mock_agent_for_edge_cases)
@@ -1734,11 +1864,13 @@ class TestRetirement:
         # Two zero-acceptance visits
         ont._update_bandit("A", reward=0.0, candidates_accepted=0)
         ont._update_bandit("A", reward=0.0, candidates_accepted=0)
-        assert ont.ontology_graph.nodes["A"].get("consecutive_low_yield", 0) == 2
+        assert ont.ontology_graph.nodes["A"].get(
+            "consecutive_low_yield", 0) == 2
 
         # One productive visit resets the counter
         ont._update_bandit("A", reward=0.85, candidates_accepted=3)
-        assert ont.ontology_graph.nodes["A"].get("consecutive_low_yield", 0) == 0
+        assert ont.ontology_graph.nodes["A"].get(
+            "consecutive_low_yield", 0) == 0
         assert not ont.ontology_graph.nodes["A"].get("retired", False)
 
         # Need 3 more consecutive failures to retire

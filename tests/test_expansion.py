@@ -25,18 +25,18 @@ from ontogen import Ontology, OntologyLevel, DEFAULT_LEVEL_SCHEMA
 @pytest.fixture
 def simple_digraph(mock_agent):
     """Build a 2-level DiGraph for UCB1 and expansion testing.
-    
+
     Structure:
     - 2 classes: Species, Location
     - 2 subclasses each: Vulcans, Humans; Planet, Starship
-    
+
     Total: 2 + 2*2 = 6 nodes (no instances yet, all classes/subclasses expandable).
-    
+
     This is lighter than the 3-level validation graph, focusing on testing
     the UCB1 selection and expansion logic specifically.
     """
     ontology = Ontology(domain="Star Trek", agent=mock_agent)
-    
+
     # Level 0: Classes
     ontology.ontology_graph.add_node(
         "Species",
@@ -54,7 +54,7 @@ def simple_digraph(mock_agent):
         n_visits=0,
         total_reward=0.0,
     )
-    
+
     # Level 1: Subclasses of Species
     ontology.ontology_graph.add_node(
         "Vulcans",
@@ -72,7 +72,7 @@ def simple_digraph(mock_agent):
         n_visits=0,
         total_reward=0.0,
     )
-    
+
     # Level 1: Subclasses of Location
     ontology.ontology_graph.add_node(
         "Planet",
@@ -90,25 +90,29 @@ def simple_digraph(mock_agent):
         n_visits=0,
         total_reward=0.0,
     )
-    
+
     # Add edges
-    ontology.ontology_graph.add_edge("Species", "Vulcans", relation="subClassOf")
-    ontology.ontology_graph.add_edge("Species", "Humans", relation="subClassOf")
-    ontology.ontology_graph.add_edge("Location", "Planet", relation="subClassOf")
-    ontology.ontology_graph.add_edge("Location", "Starship", relation="subClassOf")
-    
+    ontology.ontology_graph.add_edge(
+        "Species", "Vulcans", relation="subClassOf")
+    ontology.ontology_graph.add_edge(
+        "Species", "Humans", relation="subClassOf")
+    ontology.ontology_graph.add_edge(
+        "Location", "Planet", relation="subClassOf")
+    ontology.ontology_graph.add_edge(
+        "Location", "Starship", relation="subClassOf")
+
     return ontology
 
 
 @pytest.fixture
 def instance_only_digraph(mock_agent):
     """Build a 3-level DiGraph with only instance nodes remaining (non-expandable).
-    
+
     This tests the edge case where all remaining expandable nodes are instances,
     and _select_node_ucb1() should return None or handle the empty arm set.
     """
     ontology = Ontology(domain="Star Trek", agent=mock_agent)
-    
+
     # Single class
     ontology.ontology_graph.add_node(
         "Species",
@@ -118,7 +122,7 @@ def instance_only_digraph(mock_agent):
         n_visits=1,
         total_reward=1.0,
     )
-    
+
     # Single subclass
     ontology.ontology_graph.add_node(
         "Vulcans",
@@ -128,7 +132,7 @@ def instance_only_digraph(mock_agent):
         n_visits=1,
         total_reward=0.5,
     )
-    
+
     # Instances (not expandable)
     ontology.ontology_graph.add_node(
         "Spock",
@@ -146,12 +150,13 @@ def instance_only_digraph(mock_agent):
         n_visits=0,
         total_reward=0.0,
     )
-    
+
     # Add edges
-    ontology.ontology_graph.add_edge("Species", "Vulcans", relation="subClassOf")
+    ontology.ontology_graph.add_edge(
+        "Species", "Vulcans", relation="subClassOf")
     ontology.ontology_graph.add_edge("Vulcans", "Spock", relation="type")
     ontology.ontology_graph.add_edge("Vulcans", "T'Pol", relation="type")
-    
+
     return ontology
 
 
@@ -176,12 +181,12 @@ def mock_agent_with_seed_response(mock_agent):
             }
         ]
     })
-    
+
     candidates_json = json.dumps([
         {"term": "Romulan", "description": "Military adversary"},
         {"term": "Klingon", "description": "Warlike species"}
     ])
-    
+
     def chat_side_effect(instructions=None, input=None, prompt=None):
         """Handle both old and new chat API signatures."""
         msg = (prompt or input or "").lower()
@@ -189,12 +194,12 @@ def mock_agent_with_seed_response(mock_agent):
             return seed_json
         else:
             return candidates_json
-    
+
     mock_agent.chat.side_effect = chat_side_effect
     mock_agent.get_similarity_with_descriptions.return_value = {
         "similarity": 80  # Good similarity for candidates
     }
-    
+
     return mock_agent
 
 
@@ -205,121 +210,124 @@ def mock_agent_with_seed_response(mock_agent):
 
 class TestUCB1Selection:
     """Tests for UCB1 bandit node selection logic."""
-    
+
     def test_ucb1_selects_unvisited_node_first(self, simple_digraph):
         """Verify UCB1 prioritizes unvisited arms over visited ones.
-        
+
         Scenario:
         - All class nodes visited, but one subclass unvisited
         - Unvisited node should be selected first regardless of reward
-        
+
         This tests the exploration priority in _select_node_ucb1().
         """
         ontology = simple_digraph
-        
+
         # Manually set visit counts on all nodes
         # Classes: both visited
         ontology.ontology_graph.nodes["Species"]["n_visits"] = 1
         ontology.ontology_graph.nodes["Species"]["total_reward"] = 0.5
         ontology.ontology_graph.nodes["Location"]["n_visits"] = 1
         ontology.ontology_graph.nodes["Location"]["total_reward"] = 0.5
-        
+
         # Subclasses: Vulcans unvisited, others visited with high reward
         ontology.ontology_graph.nodes["Vulcans"]["n_visits"] = 0
         ontology.ontology_graph.nodes["Vulcans"]["total_reward"] = 0.0
-        
+
         ontology.ontology_graph.nodes["Humans"]["n_visits"] = 2
-        ontology.ontology_graph.nodes["Humans"]["total_reward"] = 1.8  # high reward
-        
+        # high reward
+        ontology.ontology_graph.nodes["Humans"]["total_reward"] = 1.8
+
         ontology.ontology_graph.nodes["Planet"]["n_visits"] = 1
         ontology.ontology_graph.nodes["Planet"]["total_reward"] = 0.5
-        
+
         ontology.ontology_graph.nodes["Starship"]["n_visits"] = 1
         ontology.ontology_graph.nodes["Starship"]["total_reward"] = 0.5
-        
+
         # Call
         selected = ontology._select_node_ucb1()
-        
+
         # Assert: unvisited node selected
         assert selected == "Vulcans", \
             f"Expected unvisited 'Vulcans' but got '{selected}'"
-    
+
     def test_ucb1_balances_exploration_exploitation(self, simple_digraph):
         """Verify UCB1 balances exploration vs exploitation after all arms visited.
-        
+
         Scenario:
         - All nodes visited uniformly (n_visits = 1 for all)
         - One node has higher reward (mean reward = total_reward / n_visits)
         - That high-reward node should be selected next
-        
+
         This tests the UCB1 scoring formula: mean + c * sqrt(ln(N) / n_i)
         """
         ontology = simple_digraph
-        
+
         # All nodes visited once, but Vulcans has higher reward
         for node in ontology.ontology_graph.nodes():
             ontology.ontology_graph.nodes[node]["n_visits"] = 1
             ontology.ontology_graph.nodes[node]["total_reward"] = 0.3
-        
+
         # Vulcans: high reward
         ontology.ontology_graph.nodes["Vulcans"]["total_reward"] = 0.8
-        
+
         # Call multiple times (may be probabilistic, but deterministic mean)
         selected_counts = {}
         for _ in range(10):
             selected = ontology._select_node_ucb1()
             selected_counts[selected] = selected_counts.get(selected, 0) + 1
-        
+
         # Assert: Vulcans selected most frequently
         assert selected_counts.get("Vulcans", 0) > 0, \
             "High-reward node 'Vulcans' was never selected"
-    
+
     def test_ucb1_excludes_non_expandable_nodes(self, instance_only_digraph):
         """Verify UCB1 excludes leaf-level (non-expandable) nodes from selection.
-        
+
         Scenario:
         - Mixed class, subclass, and instance nodes
         - Instances are not expandable (expandable=False in their level)
         - _select_node_ucb1() should only select from class/subclass nodes
-        
+
         This tests level-based expandability filtering.
         """
         ontology = instance_only_digraph
-        
+
         # Call
         selected = ontology._select_node_ucb1()
-        
+
         # Assert: selected node is not an instance
         if selected is not None:
-            selected_level = ontology.ontology_graph.nodes[selected].get("level")
+            selected_level = ontology.ontology_graph.nodes[selected].get(
+                "level")
             assert selected_level != "instance", \
                 f"Selected instance node '{selected}' but should be expandable class/subclass"
-    
+
     def test_ucb1_returns_none_when_no_expandable_nodes(self, instance_only_digraph):
         """Verify UCB1 returns None when no expandable nodes remain.
-        
+
         Scenario:
         - Force all non-instance nodes to have been expanded (visited)
         - Only instance nodes remain (which are not expandable)
         - _select_node_ucb1() should return None
-        
+
         This tests handling of the termination condition.
         """
         ontology = instance_only_digraph
-        
+
         # Mark expandable nodes as already expanded (arbitrary high visit count)
         class_subclass_nodes = [
             n for n, d in ontology.ontology_graph.nodes(data=True)
             if d.get("level") in ["class", "subclass"]
         ]
-        
+
         # Call
         selected = ontology._select_node_ucb1()
-        
+
         # With current setup, may return a subclass if not yet visited enough
         # So we test: if we return something, it must not be an instance
         if selected is not None:
-            selected_level = ontology.ontology_graph.nodes[selected].get("level")
+            selected_level = ontology.ontology_graph.nodes[selected].get(
+                "level")
             assert selected_level != "instance"
 
 
@@ -330,41 +338,42 @@ class TestUCB1Selection:
 
 class TestBanditUpdate:
     """Tests for bandit reward tracking."""
-    
+
     def test_update_bandit_increments_visits(self, simple_digraph):
         """Verify _update_bandit() increments n_visits correctly."""
         ontology = simple_digraph
         node = "Vulcans"
-        
+
         initial_visits = ontology.ontology_graph.nodes[node]["n_visits"]
         ontology._update_bandit(node, reward=0.5)
-        
+
         updated_visits = ontology.ontology_graph.nodes[node]["n_visits"]
         assert updated_visits == initial_visits + 1
-    
+
     def test_update_bandit_accumulates_reward(self, simple_digraph):
         """Verify _update_bandit() accumulates total_reward."""
         ontology = simple_digraph
         node = "Vulcans"
-        
+
         initial_reward = ontology.ontology_graph.nodes[node]["total_reward"]
         new_reward = 0.6
         ontology._update_bandit(node, reward=new_reward)
-        
+
         updated_reward = ontology.ontology_graph.nodes[node]["total_reward"]
         assert updated_reward == initial_reward + new_reward
-    
+
     def test_update_bandit_multiple_calls(self, simple_digraph):
         """Verify _update_bandit() correctly accumulates over multiple calls."""
         ontology = simple_digraph
         node = "Vulcans"
-        
+
         ontology._update_bandit(node, reward=0.5)
         ontology._update_bandit(node, reward=0.3)
         ontology._update_bandit(node, reward=0.7)
-        
+
         assert ontology.ontology_graph.nodes[node]["n_visits"] == 3
-        assert ontology.ontology_graph.nodes[node]["total_reward"] == pytest.approx(1.5)
+        assert ontology.ontology_graph.nodes[node]["total_reward"] == pytest.approx(
+            1.5)
 
 
 # ============================================================================
@@ -374,10 +383,47 @@ class TestBanditUpdate:
 
 class TestExpandOntology:
     """Tests for single expand_ontology() iteration."""
-    
+
+    def test_expand_node_adds_nodes_to_graph(self, simple_digraph, mock_agent):
+        """Verify manual expand_node() reuses the shared expansion mechanics."""
+        ontology = simple_digraph
+        initial_node_count = len(ontology.ontology_graph.nodes())
+
+        candidates = [
+            {"term": "Romulan", "description": "Military adversary"},
+            {"term": "Klingon", "description": "Warlike species"},
+        ]
+
+        with patch.object(ontology, '_generate_candidates', return_value=candidates):
+            with patch.object(ontology, '_get_similarity_cached', return_value=75):
+                with patch.object(ontology, '_check_cross_branch_links_batch'):
+                    stats = ontology.expand_node("Species")
+
+        assert len(ontology.ontology_graph.nodes()) > initial_node_count
+        assert stats["node"] == "Species"
+        assert ontology.expansion_mode == "manual"
+
+    def test_expand_node_rejects_non_expandable_node(self, instance_only_digraph):
+        """Verify manual expand_node() rejects leaf-level nodes."""
+        ontology = instance_only_digraph
+
+        with pytest.raises(ValueError, match="is not expandable"):
+            ontology.expand_node("Spock")
+
+    def test_expand_ontology_disallows_auto_after_manual_expansion(self, simple_digraph):
+        """Verify automatic expansion is blocked once manual expansion starts."""
+        ontology = simple_digraph
+
+        with patch.object(ontology, '_generate_candidates', return_value=[]):
+            with patch.object(ontology, '_check_cross_branch_links_batch'):
+                ontology.expand_node("Species")
+
+        with pytest.raises(RuntimeError, match="Automatic expansion is unavailable after manual expansion has started"):
+            ontology.expand_ontology()
+
     def test_expansion_adds_nodes_to_graph(self, simple_digraph, mock_agent):
         """Verify expand_ontology() adds generated candidates to the graph.
-        
+
         Scenario:
         - Mock _generate_candidates() to return 2 valid candidates
         - Mock similarity to return > threshold (accept all)
@@ -386,13 +432,13 @@ class TestExpandOntology:
         """
         ontology = simple_digraph
         initial_node_count = len(ontology.ontology_graph.nodes())
-        
+
         # Mock candidate generation (return 2 candidates)
         candidates = [
             {"term": "Romulan", "description": "Military adversary"},
             {"term": "Klingon", "description": "Warlike species"}
         ]
-        
+
         with patch.object(ontology, '_generate_candidates', return_value=candidates):
             # Mock similarity to accept all
             with patch.object(ontology, '_get_similarity_cached', return_value=75):
@@ -400,27 +446,27 @@ class TestExpandOntology:
                 with patch.object(ontology, '_check_cross_branch_links'):
                     # Call
                     stats = ontology.expand_ontology()
-        
+
         # Assert
         assert len(ontology.ontology_graph.nodes()) > initial_node_count, \
             "No nodes were added to graph after expansion"
         assert stats["candidates_generated"] == 2
         assert stats["candidates_accepted"] == 2
         assert stats["node"] is not None
-    
+
     def test_expansion_returns_stats_dict(self, simple_digraph, mock_agent):
         """Verify expand_ontology() returns correctly structured stats dict."""
         ontology = simple_digraph
-        
+
         candidates = [
             {"term": "Romulan", "description": "Military adversary"}
         ]
-        
+
         with patch.object(ontology, '_generate_candidates', return_value=candidates):
             with patch.object(ontology, '_get_similarity_cached', return_value=75):
                 with patch.object(ontology, '_check_cross_branch_links'):
                     stats = ontology.expand_ontology()
-        
+
         # Assert structure
         assert isinstance(stats, dict)
         assert "node" in stats
@@ -430,39 +476,41 @@ class TestExpandOntology:
         assert isinstance(stats["candidates_generated"], int)
         assert isinstance(stats["candidates_accepted"], int)
         assert isinstance(stats["reward"], float)
-    
+
     def test_expansion_returns_zero_stats_when_no_expandable_nodes(self, instance_only_digraph):
         """Verify expand_ontology() returns zero stats when no expandable nodes remain."""
         ontology = instance_only_digraph
-        
+
         # Call
         stats = ontology.expand_ontology()
-        
+
         # Assert: returns empty stats dict (or all zeros)
         assert stats["node"] is None or stats["candidates_generated"] == 0
         assert stats["candidates_accepted"] == 0
-    
-    def test_expansion_computes_reward_from_similar_candidates(self, simple_digraph, mock_agent):
-        """Verify reward is computed as mean similarity of accepted candidates."""
+
+    def test_expansion_computes_reward_from_generated_candidates(self, simple_digraph, mock_agent):
+        """Verify reward reflects accepted similarity mass per generated candidate."""
         ontology = simple_digraph
-        
-        # Use candidates that don't exist in the test graph
+
         candidates = [
             {"term": "NewSpecies1", "description": "A new species"},
-            {"term": "NewSpecies2", "description": "Another new species"}
+            {"term": "NewSpecies2", "description": "Another new species"},
+            {"term": "RejectedSpecies1", "description": "A weak match"},
+            {"term": "RejectedSpecies2", "description": "Another weak match"},
         ]
-        
-        # Mock similarities: 80 for both
+
+        accepted_candidates = candidates[:2]
+
         def get_sim_side_effect(*args, **kwargs):
-            return 80  # Return 80 for parent-candidate similarity check
-        
+            return 80
+
         with patch.object(ontology, '_generate_candidates', return_value=candidates):
-            with patch.object(ontology, '_get_similarity_cached', side_effect=get_sim_side_effect):
-                with patch.object(ontology, '_check_cross_branch_links'):
-                    stats = ontology.expand_ontology()
-        
-        # Assert: reward is mean similarity / 100
-        expected_reward = (80 + 80) / 100 / 2
+            with patch.object(ontology, '_validate_candidates', return_value=accepted_candidates):
+                with patch.object(ontology, '_get_similarity_cached', side_effect=get_sim_side_effect):
+                    with patch.object(ontology, '_check_cross_branch_links_batch'):
+                        stats = ontology.expand_ontology()
+
+        expected_reward = (80 + 80) / 100 / len(candidates)
         assert stats["reward"] == pytest.approx(expected_reward)
 
 
@@ -473,16 +521,27 @@ class TestExpandOntology:
 
 class TestGenerateOntology:
     """Tests for full generate_ontology() pipeline."""
-    
+
+    def test_generate_ontology_disallows_auto_after_manual_expansion(self, simple_digraph):
+        """Verify the full automatic pipeline is blocked after manual expansion begins."""
+        ontology = simple_digraph
+
+        with patch.object(ontology, '_generate_candidates', return_value=[]):
+            with patch.object(ontology, '_check_cross_branch_links_batch'):
+                ontology.expand_node("Species")
+
+        with pytest.raises(RuntimeError, match="Automatic ontology generation is unavailable after manual expansion has started"):
+            ontology.generate_ontology()
+
     def test_generate_ontology_respects_max_iterations(self, mock_agent_with_seed_response):
         """Verify generate_ontology() terminates at max_iterations.
-        
+
         Scenario:
         - Set max_iterations=2
         - Mock all LLM calls to succeed
         - Call generate_ontology()
         - Assert loop executed at most 2 expansion iterations
-        
+
         This tests iteration counting and loop termination.
         """
         ontology = Ontology(
@@ -490,24 +549,24 @@ class TestGenerateOntology:
             agent=mock_agent_with_seed_response,
             max_iterations=2
         )
-        
+
         iteration_count = 0
         original_expand = ontology.expand_ontology
-        
+
         def counting_expand():
             nonlocal iteration_count
             iteration_count += 1
             return original_expand()
-        
+
         with patch.object(ontology, 'expand_ontology', side_effect=counting_expand):
             with patch.object(ontology, 'build_ontology'):
                 with patch.object(ontology, 'serialize_ontology', return_value="# Turtle output"):
                     ontology.generate_ontology()
-        
+
         # Assert: loop ran at most max_iterations times
         assert iteration_count <= 2, \
             f"Loop ran {iteration_count} times but max_iterations=2"
-    
+
     def test_generate_ontology_returns_rdf_graph(self, mock_agent_with_seed_response):
         """Verify generate_ontology() returns an RDF Graph object."""
         ontology = Ontology(
@@ -515,17 +574,17 @@ class TestGenerateOntology:
             agent=mock_agent_with_seed_response,
             max_iterations=1
         )
-        
+
         with patch.object(ontology, 'build_ontology'):
             with patch.object(ontology, 'serialize_ontology', return_value="# Turtle output"):
                 result = ontology.generate_ontology()
-        
+
         # Result should be the RDF graph (or at least have graph-like behavior)
         assert result is not None
-    
+
     def test_generate_ontology_calls_all_phases(self, mock_agent_with_seed_response):
         """Verify generate_ontology() orchestrates all phases correctly.
-        
+
         Scenario:
         - Mock key methods (seed, validate, expand, build, serialize)
         - Call generate_ontology()
@@ -536,35 +595,35 @@ class TestGenerateOntology:
             agent=mock_agent_with_seed_response,
             max_iterations=1
         )
-        
+
         call_order = []
-        
+
         original_seed = ontology.generate_initial_terms
         original_create = ontology.create_seed_ontology
         original_validate = ontology.validate_structure
         original_build = ontology.build_ontology
         original_serialize = ontology.serialize_ontology
-        
+
         def track_seed(*args, **kwargs):
             call_order.append("seed")
             return original_seed(*args, **kwargs)
-        
+
         def track_create(*args, **kwargs):
             call_order.append("create")
             return original_create(*args, **kwargs)
-        
+
         def track_validate(*args, **kwargs):
             call_order.append("validate")
             return original_validate(*args, **kwargs)
-        
+
         def track_build(*args, **kwargs):
             call_order.append("build")
             return original_build(*args, **kwargs)
-        
+
         def track_serialize(*args, **kwargs):
             call_order.append("serialize")
             return original_serialize(*args, **kwargs)
-        
+
         with patch.object(ontology, 'generate_initial_terms', side_effect=track_seed):
             with patch.object(ontology, 'create_seed_ontology', side_effect=track_create):
                 with patch.object(ontology, 'validate_structure', side_effect=track_validate):
@@ -577,14 +636,14 @@ class TestGenerateOntology:
                                 "reward": 0.0
                             }):
                                 ontology.generate_ontology()
-        
+
         # Assert: phases called in expected order
         assert "seed" in call_order
         assert "create" in call_order
         assert "validate" in call_order
         assert "build" in call_order
         assert "serialize" in call_order
-        
+
         # Rough order check (seed before create before validate)
         seed_idx = call_order.index("seed")
         create_idx = call_order.index("create")
@@ -647,7 +706,8 @@ class TestGenerateOntology:
         assert ontology.history.config["max_iterations"] == 2
 
         # Phase records
-        assert len(ontology.history.phases) >= 4  # seed, graph, validation, expansion, rdf, file
+        # seed, graph, validation, expansion, rdf, file
+        assert len(ontology.history.phases) >= 4
 
         # Expansion records
         assert len(ontology.history.expansion_records) >= 2
@@ -675,7 +735,7 @@ class TestGenerateOntology:
 
 class TestExpansionIntegration:
     """Integration tests for expansion workflow."""
-    
+
     def test_expansion_loop_grows_ontology(self, mock_agent_with_seed_response):
         """Verify multiple expansion iterations grow the ontology graph."""
         ontology = Ontology(
@@ -683,11 +743,11 @@ class TestExpansionIntegration:
             agent=mock_agent_with_seed_response,
             max_iterations=3  # Allow a few iterations
         )
-        
+
         # Mock expand_ontology to add nodes each time
         call_count = [0]
         original_expand = ontology.expand_ontology
-        
+
         def mock_expand_with_side_effect():
             call_count[0] += 1
             # On first few calls, return valid stats (add a node)
@@ -706,44 +766,44 @@ class TestExpansionIntegration:
                     "candidates_accepted": 0,
                     "reward": 0.0
                 }
-        
+
         with patch.object(ontology, 'expand_ontology', side_effect=mock_expand_with_side_effect):
             with patch.object(ontology, 'build_ontology'):
                 with patch.object(ontology, 'serialize_ontology', return_value="# Turtle output"):
                     ontology.generate_ontology()
-        
+
         # Assert: expand_ontology() was called at least once
         assert call_count[0] > 0
-    
+
     def test_expansion_with_different_exploration_constant(self, simple_digraph, mock_agent):
         """Verify exploration_constant affects UCB1 selection behavior."""
         ontology_low = simple_digraph
         ontology_low.exploration_constant = 0.5  # Low exploration
-        
+
         # Reset visit counts
         for node in ontology_low.ontology_graph.nodes():
             ontology_low.ontology_graph.nodes[node]["n_visits"] = 1
             ontology_low.ontology_graph.nodes[node]["total_reward"] = 0.3
-        
+
         ontology_low.ontology_graph.nodes["Vulcans"]["total_reward"] = 0.8
-        
+
         # Call with low exploration constant
         selected_low = ontology_low._select_node_ucb1()
-        
+
         # Create similar ontology with high exploration constant
         ontology_high = simple_digraph
         ontology_high.exploration_constant = 2.0  # High exploration
-        
+
         for node in ontology_high.ontology_graph.nodes():
             ontology_high.ontology_graph.nodes[node]["n_visits"] = 1
             ontology_high.ontology_graph.nodes[node]["total_reward"] = 0.3
-        
+
         ontology_high.ontology_graph.nodes["Vulcans"]["total_reward"] = 0.8
-        
+
         # Both should still prefer high-reward node, but we're mostly testing
         # that different constants don't crash
         selected_high = ontology_high._select_node_ucb1()
-        
+
         assert selected_low is not None
         assert selected_high is not None
 
@@ -757,13 +817,13 @@ class TestConvergence:
     """Tests for expansion loop convergence / early termination logic."""
 
     def test_stagnation_triggers_early_stop(self, mock_agent_with_seed_response):
-        """Verify that 5 consecutive no-growth iterations trigger early termination.
+        """Verify that 8 consecutive no-growth iterations trigger early termination.
 
         Scenario:
         - max_iterations=10
         - expand_ontology always returns 0 accepted candidates
         - Graph never grows → stagnation_count increments each iteration
-        - Should stop at iteration 5 (STAGNATION_LIMIT) instead of 10
+        - Should stop at iteration 8 (STAGNATION_LIMIT) instead of 10
         """
         ontology = Ontology(
             domain="Star Trek",
@@ -785,7 +845,7 @@ class TestConvergence:
                     ontology.generate_ontology()
 
         assert ontology.history is not None
-        assert ontology.history.total_iterations == 5
+        assert ontology.history.total_iterations == 8
         assert ontology.history.early_terminated is True
         assert "stagnant" in ontology.history.termination_reason
 
@@ -811,9 +871,11 @@ class TestConvergence:
 
         def create_and_mark_visited():
             original_create()
+            revisit_marked = False
             for node in ontology.ontology_graph.nodes():
                 if ontology.ontology_graph.nodes[node].get("level") != "instance":
-                    ontology.ontology_graph.nodes[node]["n_visits"] = 1
+                    ontology.ontology_graph.nodes[node]["n_visits"] = 2 if not revisit_marked else 1
+                    revisit_marked = True
 
         def mock_expand():
             call_count[0] += 1
@@ -850,6 +912,49 @@ class TestConvergence:
         assert ontology.history is not None
         assert ontology.history.total_iterations < 20
         assert ontology.history.early_terminated is True
+
+    def test_plateau_requires_revisit_before_convergence(self, mock_agent_with_seed_response):
+        """Verify plateau convergence does not fire during a cold-start-only run."""
+        ontology = Ontology(
+            domain="Star Trek",
+            agent=mock_agent_with_seed_response,
+            max_iterations=6,
+        )
+
+        original_create = ontology.create_seed_ontology
+
+        def create_and_mark_visited_once():
+            original_create()
+            for node in ontology.ontology_graph.nodes():
+                if ontology.ontology_graph.nodes[node].get("level") != "instance":
+                    ontology.ontology_graph.nodes[node]["n_visits"] = 1
+
+        def mock_expand():
+            node_id = f"new_node_{len(ontology.history.expansion_records) + 1}"
+            ontology.ontology_graph.add_node(
+                node_id,
+                term=node_id,
+                level="instance",
+                n_visits=0,
+                total_reward=0.0,
+            )
+            return {
+                "node": "Parent",
+                "candidates_generated": 20,
+                "candidates_accepted": 1,
+                "reward": 0.85,
+            }
+
+        with patch.object(ontology, "create_seed_ontology", side_effect=create_and_mark_visited_once):
+            with patch.object(ontology, "expand_ontology", side_effect=mock_expand):
+                with patch.object(ontology, "build_ontology"):
+                    with patch.object(ontology, "serialize_ontology", return_value="# TTL"):
+                        ontology.generate_ontology()
+
+        assert ontology.history is not None
+        assert ontology.history.total_iterations == 6
+        assert ontology.history.early_terminated is False
+        assert ontology.history.termination_reason == "max_iterations"
 
     def test_plateau_resets_when_reward_changes(self, mock_agent_with_seed_response):
         """Verify that a genuine reward change resets the plateau counter."""
@@ -890,7 +995,8 @@ class TestConvergence:
         # Iteration 3 (0.85, 0.85, 0.85) → plateau(2) but only 2, not 3 yet
         # Iteration 4 (0.50) → plateau resets to 0
         # Iterations 5-7 (0.50, 0.50, 0.50) → plateau(3) → should converge
-        assert records[2].plateau_count == 2  # iter 3: consecutive 0.85 (2nd consecutive)
+        # iter 3: consecutive 0.85 (2nd consecutive)
+        assert records[2].plateau_count == 2
         assert records[3].plateau_count == 0  # iter 4: reward changed to 0.50
 
     def test_stagnation_count_in_expansion_record(self, mock_agent_with_seed_response):

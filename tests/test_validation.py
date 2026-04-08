@@ -34,7 +34,8 @@ def sample_digraph(mock_agent):
     This fixture provides a realistic test graph that exercises all three
     pair categories (parent-child, sibling, cross-branch).
     """
-    ontology = Ontology(domain="Star Trek", agent=mock_agent, similarity_threshold=50)
+    ontology = Ontology(domain="Star Trek", agent=mock_agent,
+                        similarity_threshold=50)
 
     # Create nodes at each level with attributes
     # Level 0: Classes
@@ -242,16 +243,35 @@ def ontology_with_isolated_node(sample_digraph):
 class TestValidationPairsGeneration:
     """Tests for Ontology._generate_validation_pairs() method."""
 
+    def test_similarity_cache_forwards_context_label(self, sample_digraph, mock_agent):
+        """Similarity cache calls should forward context labels to the agent when supported."""
+        mock_agent.get_similarity_with_descriptions = MagicMock(
+            return_value={"similarity": 88.0}
+        )
+        sample_digraph.agent = mock_agent
+
+        score = sample_digraph._get_similarity_cached(
+            term_a="Species",
+            description_a="Sentient species in Star Trek universe",
+            term_b="Vulcans",
+            description_b="Logical telepathic species from Vulcan",
+            context_label="Phase 3 validation",
+        )
+
+        assert score == 88.0
+        assert mock_agent.get_similarity_with_descriptions.call_args.kwargs[
+            "request_label"
+        ] == "Phase 3 validation"
+
     def test_validation_generates_correct_pair_categories(self, sample_digraph):
-        """Verify that _generate_validation_pairs() generates all three pair categories.
+        """Verify that _generate_validation_pairs() generates parent-child pairs.
 
         Scenario:
         - Build a balanced 3-level DiGraph (2 classes, 2 subclasses each, 2 instances each)
         - Call _generate_validation_pairs()
-        - Verify: result contains parent-child pairs, sibling pairs, and cross-branch pairs
-        - Verify: all three categories are represented
+        - Verify: result contains only parent-child pairs
 
-        This tests the fundamental pair generation across all category types.
+        This tests the fundamental pair generation for structural validation.
         """
         # Call: Generate validation pairs
         pairs = sample_digraph._generate_validation_pairs()
@@ -266,13 +286,12 @@ class TestValidationPairsGeneration:
             assert "term_y" in pair
             assert "desc_y" in pair
             assert "category" in pair
-            assert pair["category"] in ["parent-child", "sibling", "cross-branch"]
+            assert pair["category"] == "parent-child"
 
-        # Assert: All three categories are present
+        # Assert: Only parent-child category is present
         categories = {pair["category"] for pair in pairs}
-        assert "parent-child" in categories, "Should have parent-child pairs"
-        assert "sibling" in categories, "Should have sibling pairs"
-        assert "cross-branch" in categories, "Should have cross-branch pairs"
+        assert categories == {
+            "parent-child"}, "Should only have parent-child pairs"
 
     def test_parent_child_pairs_match_edges(self, sample_digraph):
         """Verify that parent-child pairs correspond to actual edges in the graph.
@@ -317,103 +336,6 @@ class TestValidationPairsGeneration:
             assert sample_digraph.ontology_graph.has_edge(
                 parent_id, child_id
             ), f"Edge {parent_id} → {child_id} should exist for pair {term_x} → {term_y}"
-
-    def test_sibling_pairs_have_same_parent(self, sample_digraph):
-        """Verify that sibling pairs correspond to children of a common parent.
-
-        Scenario:
-        - Call _generate_validation_pairs()
-        - Filter to sibling pairs only
-        - For each pair, verify they share a common parent in the graph
-
-        This tests that sibling pair generation correctly identifies same-parent pairs.
-        """
-        # Call: Generate validation pairs
-        pairs = sample_digraph._generate_validation_pairs()
-
-        # Filter sibling pairs
-        sibling_pairs = [p for p in pairs if p["category"] == "sibling"]
-
-        # Assert: We have sibling pairs
-        assert len(sibling_pairs) > 0, "Should have at least one sibling pair"
-
-        # For each pair, verify they share a common parent
-        for pair in sibling_pairs:
-            term_x = pair["term_x"]
-            term_y = pair["term_y"]
-
-            # Build term→node_id lookup
-            term_to_id = {
-                sample_digraph.ontology_graph.nodes[n]["term"]: n
-                for n in sample_digraph.ontology_graph.nodes()
-            }
-            assert term_x in term_to_id, f"Should find node for term {term_x}"
-            assert term_y in term_to_id, f"Should find node for term {term_y}"
-
-            # Get predecessors (parents)
-            parents_x = set(sample_digraph.ontology_graph.predecessors(term_to_id[term_x]))
-            parents_y = set(sample_digraph.ontology_graph.predecessors(term_to_id[term_y]))
-
-            # Assert: They share at least one parent
-            common_parents = parents_x & parents_y
-            assert (
-                len(common_parents) > 0
-            ), f"Sibling pair {term_x} and {term_y} should share a common parent"
-
-    def test_cross_branch_pairs_from_different_classes(self, sample_digraph):
-        """Verify that cross-branch pairs come from different top-level classes.
-
-        Scenario:
-        - Call _generate_validation_pairs()
-        - Filter to cross-branch pairs only
-        - For each pair, verify they descend from different top-level class nodes
-
-        This tests that cross-branch pairs represent inter-class relationships.
-        """
-        # Call: Generate validation pairs
-        pairs = sample_digraph._generate_validation_pairs()
-
-        # Filter cross-branch pairs
-        cb_pairs = [p for p in pairs if p["category"] == "cross-branch"]
-
-        # Assert: We have cross-branch pairs
-        assert len(cb_pairs) > 0, "Should have at least one cross-branch pair"
-
-        # For each pair, verify they come from different class branches
-        for pair in cb_pairs:
-            term_x = pair["term_x"]
-            term_y = pair["term_y"]
-
-            # Find node IDs for these terms
-            node_x_id = None
-            node_y_id = None
-            for node_id in sample_digraph.ontology_graph.nodes():
-                node_term = sample_digraph.ontology_graph.nodes[node_id]["term"]
-                if node_term == term_x:
-                    node_x_id = node_id
-                if node_term == term_y:
-                    node_y_id = node_id
-
-            assert node_x_id is not None, f"Should find node for term {term_x}"
-            assert node_y_id is not None, f"Should find node for term {term_y}"
-
-            # Find the top-level class ancestors
-            def find_class_ancestor(node_id, graph):
-                """Recursively find the top-level class ancestor of a node."""
-                parents = list(graph.predecessors(node_id))
-                if not parents:
-                    # This is a root (top-level class)
-                    return node_id
-                # Assume first parent (could be improved)
-                return find_class_ancestor(parents[0], graph)
-
-            class_x = find_class_ancestor(node_x_id, sample_digraph.ontology_graph)
-            class_y = find_class_ancestor(node_y_id, sample_digraph.ontology_graph)
-
-            # They should be from different classes
-            assert (
-                class_x != class_y
-            ), f"Cross-branch pair should be from different classes, but both from {class_x}"
 
 
 class TestValidationPruning:
@@ -489,7 +411,8 @@ class TestValidationPruning:
         initial_edges = sample_digraph.ontology_graph.number_of_edges()
 
         # Setup: Mock agent to return high similarity for all pairs
-        mock_agent.get_similarity_with_descriptions.return_value = {"similarity": 90.0}
+        mock_agent.get_similarity_with_descriptions.return_value = {
+            "similarity": 90.0}
         sample_digraph.agent = mock_agent
 
         # Call: Validate structure
@@ -501,82 +424,6 @@ class TestValidationPruning:
         # Assert: Edge count unchanged
         final_edges = sample_digraph.ontology_graph.number_of_edges()
         assert final_edges == initial_edges, "Edge count should not change when no pruning"
-
-    def test_pruning_counts_siblings_flagged(self, sample_digraph, mock_agent):
-        """Verify that sibling dissimilarity is flagged correctly.
-
-        Scenario:
-        - Graph has siblings (e.g., Spock and T'Pol both under Vulcans)
-        - Mock LLM: return low similarity (< 30%) for specific sibling pair
-        - Call validate_structure()
-        - Verify: siblings_flagged counter includes this pair
-        - Verify: Edge is NOT removed (sibling pairs don't cause pruning)
-
-        This tests the sibling flagging logic (informational, no graph change).
-        """
-        # Setup: Record initial edge count
-        initial_edges = sample_digraph.ontology_graph.number_of_edges()
-
-        # Setup: Mock agent to return low similarity for Spock-T'Pol pair only
-        def mock_similarity(term_x, description_x, term_y, description_y):
-            """Mock similarity: low for Spock-T'Pol, medium for others."""
-            terms = {term_x, term_y}
-            if terms == {"Spock", "T'Pol"}:
-                return {"similarity": 20.0}  # Below 30% sibling threshold
-            return {"similarity": 75.0}  # Above threshold for other pairs
-
-        mock_agent.get_similarity_with_descriptions.side_effect = mock_similarity
-        sample_digraph.agent = mock_agent
-
-        # Call: Validate structure
-        summary = sample_digraph.validate_structure()
-
-        # Assert: siblings_flagged counter > 0
-        assert (
-            summary["siblings_flagged"] >= 1
-        ), "Should flag low-similarity sibling pair"
-
-        # Assert: Edge count unchanged (sibling dissimilarity doesn't prune)
-        final_edges = sample_digraph.ontology_graph.number_of_edges()
-        assert final_edges == initial_edges, "Sibling flags should not remove edges"
-
-    def test_cross_branch_candidates_flagged(self, sample_digraph, mock_agent):
-        """Verify that high-similarity cross-branch pairs are flagged.
-
-        Scenario:
-        - Graph has cross-branch pairs (e.g., Spock from Species, Planet from Location)
-        - Mock LLM: return high similarity (> 70%) for one cross-branch pair
-        - Call validate_structure()
-        - Verify: cross_branch_candidates counter includes this pair
-        - Verify: Edge is NOT added (flagging only, no graph change)
-
-        This tests cross-branch candidate detection for future linking.
-        """
-        # Setup: Record initial edge count
-        initial_edges = sample_digraph.ontology_graph.number_of_edges()
-
-        # Setup: Mock agent to return high similarity for cross-branch pair
-        def mock_similarity(term_x, description_x, term_y, description_y):
-            """Mock similarity: high for Vulcans-Planet pair."""
-            terms = {term_x, term_y}
-            if terms == {"Vulcans", "Planet"}:
-                return {"similarity": 85.0}  # Above 70% cross-branch threshold
-            return {"similarity": 50.0}  # Below threshold for other pairs
-
-        mock_agent.get_similarity_with_descriptions.side_effect = mock_similarity
-        sample_digraph.agent = mock_agent
-
-        # Call: Validate structure
-        summary = sample_digraph.validate_structure()
-
-        # Assert: cross_branch_candidates counter > 0
-        assert (
-            summary["cross_branch_candidates"] >= 1
-        ), "Should flag high-similarity cross-branch pair"
-
-        # Assert: Edge count unchanged (candidates don't add edges automatically)
-        final_edges = sample_digraph.ontology_graph.number_of_edges()
-        assert final_edges == initial_edges, "Cross-branch flags should not modify graph"
 
 
 class TestOrphanDetection:
@@ -608,7 +455,8 @@ class TestOrphanDetection:
         ), "Klingon should be isolated"
 
         # Setup: Mock agent to return high similarity (no pruning)
-        mock_agent.get_similarity_with_descriptions.return_value = {"similarity": 80.0}
+        mock_agent.get_similarity_with_descriptions.return_value = {
+            "similarity": 80.0}
         ontology_with_isolated_node.agent = mock_agent
 
         # Call: Validate structure
@@ -661,7 +509,8 @@ class TestOrphanDetection:
         This tests the summary return value structure.
         """
         # Setup: Mock agent with uniform similarity
-        mock_agent.get_similarity_with_descriptions.return_value = {"similarity": 60.0}
+        mock_agent.get_similarity_with_descriptions.return_value = {
+            "similarity": 60.0}
         sample_digraph.agent = mock_agent
 
         # Call: Validate structure
@@ -670,8 +519,6 @@ class TestOrphanDetection:
         # Assert: Summary dict has all required keys
         required_keys = {
             "edges_pruned",
-            "siblings_flagged",
-            "cross_branch_candidates",
             "orphaned_nodes",
         }
         assert set(summary.keys()) == required_keys, \
@@ -679,7 +526,8 @@ class TestOrphanDetection:
 
         # Assert: All values are integers
         for key, value in summary.items():
-            assert isinstance(value, int), f"{key} should be int, got {type(value)}"
+            assert isinstance(
+                value, int), f"{key} should be int, got {type(value)}"
 
         # Assert: All counts are non-negative
         for key, value in summary.items():
