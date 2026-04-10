@@ -56,6 +56,18 @@ def create_sidebar(pathname: str) -> html.Div:
     )
 
 
+def create_topbar(pathname: str | None) -> html.Div:
+    """Build the slim topbar for the current route."""
+    section = PAGE_LABELS.get(pathname or "/", "Workspace")
+    return html.Div(
+        className="topbar",
+        children=[
+            html.Div("ontogen", className="topbar-title"),
+            html.Div(section.upper(), className="topbar-page"),
+        ],
+    )
+
+
 def empty_state(title: str, message: str) -> html.Div:
     """Render a simple empty-state card."""
     return html.Div(
