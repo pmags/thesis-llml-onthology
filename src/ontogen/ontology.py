@@ -20,6 +20,7 @@ from ontogen.expansion import ExpansionMixin
 from ontogen.llm_client import ChatGpt
 from ontogen.models import OntologyLevel, DEFAULT_LEVEL_SCHEMA
 from ontogen.progress import print_phase
+from ontogen.resolution import ResolutionMixin
 from ontogen.serialization import SerializationMixin
 from ontogen.seed import SeedMixin
 from ontogen.validation import ValidationMixin
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 class Ontology(
     ExpansionMixin,
+    ResolutionMixin,
     ValidationMixin,
     SeedMixin,
     SerializationMixin,

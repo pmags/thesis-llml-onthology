@@ -177,6 +177,8 @@ class ExpansionMixin:
         ) if existing_terms else "none yet"
 
         role_description = child_level_def.pluralized_name
+        if child_level_def.is_lexical:
+            role_description = f"{role_description} (natural-language aliases)"
 
         prompt = f"""Given the domain "{self.domain}" and scope "{self.scope_description}", generate {self.candidates_per_iteration} new {role_description} for the following {parent_level}:
 
@@ -428,6 +430,7 @@ class ExpansionMixin:
             term=candidate_term,
             description=candidate_desc,
             level=child_level_name,
+            is_lexical=child_level_def.is_lexical,
             n_visits=0,
             total_reward=0.0,
         )

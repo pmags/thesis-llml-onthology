@@ -33,6 +33,9 @@ class OntologyLevel:
         children_key: The JSON key used in the seed taxonomy to find children of this
             level (e.g., "subclasses", "instances"). None for leaf levels.
         plural_name: Optional plural label used in prompts (e.g., "classes").
+        is_lexical: Whether this level represents lexical aliases/surface forms rather
+            than domain ontology concepts. Lexical levels are useful for resolution,
+            but should typically stay out of RDF serialization.
     """
 
     name: str
@@ -43,6 +46,7 @@ class OntologyLevel:
     seed_key: str = "class"
     children_key: Optional[str] = None
     plural_name: Optional[str] = None
+    is_lexical: bool = False
 
     @property
     def pluralized_name(self) -> str:

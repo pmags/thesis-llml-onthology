@@ -55,6 +55,12 @@ class SeedMixin:
                 level_descriptions.append(
                     f"LEVEL {level_num}: {level.name.upper()} - Top-level abstract categories in {self.domain}"
                 )
+            elif level.is_lexical:
+                parent_level = self.level_schema[index - 1]
+                level_descriptions.append(
+                    f"LEVEL {level_num}: {level.name.upper()} - Natural-language aliases or surface forms "
+                    f"people may use for each {parent_level.name}"
+                )
             else:
                 parent_level = self.level_schema[index - 1]
                 level_descriptions.append(
@@ -240,13 +246,28 @@ class SeedMixin:
             )
             return term
 
+        # Preserve any extra annotations from the seed item (e.g. pbi_field,
+        # pbi_table, dax_template) as node attributes.  Only scalar values are
+        # kept — nested structures (lists/dicts) belong to children_key or
+        # other non-annotation fields.
+        reserved_keys = {level.seed_key, "description"}
+        if level.children_key:
+            reserved_keys.add(level.children_key)
+        extra_attrs = {
+            k: v
+            for k, v in item.items()
+            if k not in reserved_keys and isinstance(v, (str, int, float, bool))
+        }
+
         self.ontology_graph.add_node(
             term,
             term=term,
             description=description,
             level=level.name,
+            is_lexical=level.is_lexical,
             n_visits=0,
             total_reward=0.0,
+            **extra_attrs,
         )
 
         if parent_id is not None and level.relation_to_parent:

@@ -1,18 +1,6 @@
 @prefix ex: <http://example.org/ontology/> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
-ex:Alien_Species_Representatives a rdfs:Class ;
-    rdfs:label "Alien Species Representatives" ;
-    rdfs:subClassOf ex:Characters .
-
-ex:Ancient_Civilizations_Planets a rdfs:Class ;
-    rdfs:label "Ancient Civilizations' Planets" ;
-    rdfs:subClassOf ex:Planets .
-
-ex:Aquatic_Species a rdfs:Class ;
-    rdfs:label "Aquatic Species" ;
-    rdfs:subClassOf ex:Species .
-
 ex:Artificial_Lifeforms a rdfs:Class ;
     rdfs:label "Artificial Lifeforms" ;
     rdfs:subClassOf ex:Species .
@@ -24,17 +12,6 @@ ex:Borg_Cubes a rdfs:Class ;
 ex:Cardassian_Galor-Class_Ships a rdfs:Class ;
     rdfs:label "Cardassian Galor-Class Ships" ;
     rdfs:subClassOf ex:Starships .
-
-ex:Characters a ex:Borg_Incursions,
-        ex:Federation-Hostile_Engagements,
-        ex:Federation_Medical_Corps,
-        ex:Klingon-Federation_Skirmishes,
-        rdfs:Class ;
-    rdfs:label "Characters" .
-
-ex:Civilians_and_Non-Starfleet_Personnel a rdfs:Class ;
-    rdfs:label "Civilians and Non-Starfleet Personnel" ;
-    rdfs:subClassOf ex:Characters .
 
 ex:Class_M_Planets a rdfs:Class ;
     rdfs:label "Class M Planets" ;
@@ -52,25 +29,13 @@ ex:Criminal_Syndicates a rdfs:Class ;
     rdfs:label "Criminal Syndicates" ;
     rdfs:subClassOf ex:Organizations .
 
-ex:Dominion_Battlecruisers a rdfs:Class ;
-    rdfs:label "Dominion Battlecruisers" ;
-    rdfs:subClassOf ex:Starships .
-
-ex:Energy_Beings a rdfs:Class ;
-    rdfs:label "Energy Beings" ;
+ex:Energy-Based_Entities a rdfs:Class ;
+    rdfs:label "Energy-Based Entities" ;
     rdfs:subClassOf ex:Species .
 
 ex:Energy_Shields a rdfs:Class ;
     rdfs:label "Energy Shields" ;
     rdfs:subClassOf ex:Technology .
-
-ex:Events a ex:Science_Officers,
-        rdfs:Class ;
-    rdfs:label "Events" .
-
-ex:Federation-Hostile_Engagements a rdfs:Class ;
-    rdfs:label "Federation-Hostile Engagements" ;
-    rdfs:subClassOf ex:Events .
 
 ex:Federation_Organizations a rdfs:Class ;
     rdfs:label "Federation Organizations" ;
@@ -83,14 +48,6 @@ ex:Federation_Planets a rdfs:Class ;
 ex:Federation_Starships a rdfs:Class ;
     rdfs:label "Federation Starships" ;
     rdfs:subClassOf ex:Starships .
-
-ex:Ferengi_Marauders a rdfs:Class ;
-    rdfs:label "Ferengi Marauders" ;
-    rdfs:subClassOf ex:Starships .
-
-ex:First_Contact_Events a rdfs:Class ;
-    rdfs:label "First Contact Events" ;
-    rdfs:subClassOf ex:Events .
 
 ex:Humanoids a rdfs:Class ;
     rdfs:label "Humanoids" ;
@@ -121,32 +78,19 @@ ex:Non-Humanoids a rdfs:Class ;
     rdfs:subClassOf ex:Species .
 
 ex:Organizations a ex:Andoria,
-        ex:Cait,
-        ex:Sarek_of_Vulcan,
-        ex:Starfleet_Officers,
-        ex:USS_Discovery,
+        ex:Trill,
         rdfs:Class ;
     rdfs:label "Organizations" .
 
 ex:Planets a ex:Andorians,
-        ex:Federation_Cultural_Exchange_Program,
         ex:Federation_Diplomatic_Corps,
-        ex:Federation_Medical_Corps,
         ex:Federation_Science_Bureau,
-        ex:Federation_Security_Agency,
-        ex:Federation_Trade_Commission,
-        ex:Starfleet_Officers,
-        ex:USS_Discovery,
         rdfs:Class ;
     rdfs:label "Planets" .
 
 ex:Propulsion_Systems a rdfs:Class ;
     rdfs:label "Propulsion Systems" ;
     rdfs:subClassOf ex:Technology .
-
-ex:Quarantined_Planets a rdfs:Class ;
-    rdfs:label "Quarantined Planets" ;
-    rdfs:subClassOf ex:Planets .
 
 ex:Religious_Orders a rdfs:Class ;
     rdfs:label "Religious Orders" ;
@@ -156,84 +100,51 @@ ex:Romulan_Warbirds a rdfs:Class ;
     rdfs:label "Romulan Warbirds" ;
     rdfs:subClassOf ex:Starships .
 
-ex:Species a ex:Assimilation_Cube,
-        ex:Class_M_Planets,
-        ex:Tarsis_Beta,
+ex:Species a ex:Class_M_Planets,
         rdfs:Class ;
     rdfs:label "Species" .
 
-ex:Starfleet_Officers a rdfs:Class ;
-    rdfs:label "Starfleet Officers" ;
-    rdfs:subClassOf ex:Characters .
-
-ex:Starships a ex:Borg_Incursions,
-        ex:Commanding_Officers,
-        ex:Dominion_War_Battles,
-        ex:Federation-Hostile_Engagements,
+ex:Starships a ex:Coaxial_Warp_Drive,
+        ex:Energy_Shields,
         ex:Quantum_Slipstream_Drive,
-        ex:Starfleet_Officers,
-        ex:Subspace_Tunneling_Drive,
         rdfs:Class ;
     rdfs:label "Starships" .
 
 ex:Technology a ex:Borg_Cubes,
-        ex:Borg_Incursions,
         ex:Cardassian_Galor-Class_Ships,
-        ex:Commerce_Raider,
-        ex:Dominion_Battlecruisers,
-        ex:Federation-Hostile_Engagements,
-        ex:Gamma_Vanguard,
-        ex:IRW_DRavik,
-        ex:IRW_Sharien,
-        ex:IRW_Valdore,
-        ex:JemHadars_Fury,
-        ex:Keldon-Refit_Galor,
-        ex:Ketracels_Edge,
-        ex:Klingon-Federation_Skirmishes,
-        ex:Ktinga-class_Battle_Cruiser,
-        ex:Obsidian_Spear,
-        ex:Qoj-class_Destroyer,
-        ex:Rigelian_Black_Market_Alliance,
+        ex:Criminal_Syndicates,
+        ex:Farius_Prime_Underworld,
+        ex:Keldon-Refit_Prototype,
+        ex:Ktinga,
+        ex:Mogai-class_Warbird,
+        ex:Nausicaan_Raiders,
         ex:Romulan_Warbirds,
+        ex:Scimitar-class_Warbird,
+        ex:TVaro-class_Warbird,
         ex:Tactical_Cube,
         ex:USS_Defiant,
-        ex:Veqlargh-class_Dreadnought,
-        ex:Vorcha-class_Attack_Cruiser,
-        ex:Vortas_Wrath,
+        ex:Valdore-type_Warbird,
+        ex:Vorcha,
         rdfs:Class ;
     rdfs:label "Technology" .
-
-ex:Temporal_Incidents a rdfs:Class ;
-    rdfs:label "Temporal Incidents" ;
-    rdfs:subClassOf ex:Events .
 
 ex:Temporal_Organizations a rdfs:Class ;
     rdfs:label "Temporal Organizations" ;
     rdfs:subClassOf ex:Organizations .
 
-ex:Uncharted_Planets a rdfs:Class ;
-    rdfs:label "Uncharted Planets" ;
-    rdfs:subClassOf ex:Planets .
-
-ex:Vulcan_Science_Vessels a rdfs:Class ;
-    rdfs:label "Vulcan Science Vessels" ;
-    rdfs:subClassOf ex:Starships .
+ex:Transdimensional_Beings a rdfs:Class ;
+    rdfs:label "Transdimensional Beings" ;
+    rdfs:subClassOf ex:Species .
 
 ex:Weapons a rdfs:Class ;
     rdfs:label "Weapons" ;
     rdfs:subClassOf ex:Technology .
 
-ex:Ablative_Shielding a ex:Energy_Shields ;
-    rdfs:label "Ablative Shielding" .
+ex:Aelahl-class_Warbird a ex:Romulan_Warbirds ;
+    rdfs:label "Aelahl-class Warbird" .
 
-ex:Abyssal_Thalassids a ex:Aquatic_Species ;
-    rdfs:label "Abyssal Thalassids" .
-
-ex:Anomaly_of_the_Tychon_Sector a ex:Temporal_Incidents ;
-    rdfs:label "Anomaly of the Tychon Sector" .
-
-ex:Bajor a ex:Federation_Planets ;
-    rdfs:label "Bajor" .
+ex:Assimilation_Cube a ex:Borg_Cubes ;
+    rdfs:label "Assimilation Cube" .
 
 ex:Bajorans a ex:Humanoids ;
     rdfs:label "Bajorans" .
@@ -249,44 +160,23 @@ ex:Betazoids rdfs:label "Betazoids" .
 ex:Bird-of-Prey a ex:Klingon_Starships ;
     rdfs:label "Bird-of-Prey" .
 
-ex:Brel-class_Scout_Ship a ex:Klingon_Starships ;
-    rdfs:label "B'rel-class Scout Ship" .
-
-ex:Calamarain a ex:Energy_Beings ;
-    rdfs:label "Calamarain" .
-
-ex:Cardassia_Prime a ex:Non-Federation_Planets ;
-    rdfs:label "Cardassia Prime" .
-
 ex:Cardassian_Obsidian_Order a ex:Non-Federation_Organizations ;
     rdfs:label "Cardassian Obsidian Order" .
 
 ex:Cestus_III a ex:Colony_Worlds ;
     rdfs:label "Cestus III" .
 
-ex:Chroniton_Torpedo a ex:Weapons ;
-    rdfs:label "Chroniton Torpedo" .
-
 ex:Chronometric_Defense_Corps a ex:Temporal_Organizations ;
     rdfs:label "Chronometric Defense Corps" .
-
-ex:Chronometric_Drive a ex:Propulsion_Systems ;
-    rdfs:label "Chronometric Drive" .
-
-ex:Chronometric_Rift_of_Penthara_IV a ex:Temporal_Incidents ;
-    rdfs:label "Chronometric Rift of Penthara IV" .
-
-ex:Coaxial_Warp_Drive a ex:Propulsion_Systems ;
-    rdfs:label "Coaxial Warp Drive" .
 
 ex:Command_Cube a ex:Borg_Cubes ;
     rdfs:label "Command Cube" .
 
-ex:DaiMons_Profit a ex:Ferengi_Marauders ;
-    rdfs:label "DaiMon's Profit" .
+ex:D7 a ex:Klingon_Starships ;
+    rdfs:label "D7" .
 
-ex:Deflector_Shield a ex:Energy_Shields ;
-    rdfs:label "Deflector Shield" .
+ex:Dderidex-class_Warbird a ex:Romulan_Warbirds ;
+    rdfs:label "D'deridex-class Warbird" .
 
 ex:Department_of_Temporal_Investigations a ex:Temporal_Organizations ;
     rdfs:label "Department of Temporal Investigations" .
@@ -294,17 +184,8 @@ ex:Department_of_Temporal_Investigations a ex:Temporal_Organizations ;
 ex:Dermal_Regenerator a ex:Medical_Devices ;
     rdfs:label "Dermal Regenerator" .
 
-ex:Discovery_of_the_Ferengi a ex:First_Contact_Events ;
-    rdfs:label "Discovery of the Ferengi" .
-
 ex:Disruptor a ex:Weapons ;
     rdfs:label "Disruptor" .
-
-ex:Douwd a ex:Energy_Beings ;
-    rdfs:label "Douwd" .
-
-ex:Dr_Lirena_Voss a ex:Civilians_and_Non-Starfleet_Personnel ;
-    rdfs:label "Dr. Lirena Voss" .
 
 ex:Duras_Cartel a ex:Criminal_Syndicates ;
     rdfs:label "Duras Cartel" .
@@ -312,17 +193,8 @@ ex:Duras_Cartel a ex:Criminal_Syndicates ;
 ex:Earth a ex:Federation_Planets ;
     rdfs:label "Earth" .
 
-ex:Edo_God a ex:Non-Humanoids ;
-    rdfs:label "Edo God" .
-
 ex:Emergency_Medical_Hologram_EMH a ex:Artificial_Lifeforms ;
     rdfs:label "Emergency Medical Hologram (EMH)" .
-
-ex:Encounter_with_the_Vulcans a ex:First_Contact_Events ;
-    rdfs:label "Encounter with the Vulcans" .
-
-ex:Eryndor_Abyss a ex:Uncharted_Planets ;
-    rdfs:label "Eryndor Abyss" .
 
 ex:Excalbians a ex:Non-Humanoids ;
     rdfs:label "Excalbians" .
@@ -333,62 +205,26 @@ ex:Exocomp a ex:Artificial_Lifeforms ;
 ex:Federation_Council a ex:Federation_Organizations ;
     rdfs:label "Federation Council" .
 
-ex:Ferengi_Shadow_Consortium a ex:Criminal_Syndicates ;
-    rdfs:label "Ferengi Shadow Consortium" .
+ex:Federation_News_Service a ex:Federation_Organizations ;
+    rdfs:label "Federation News Service" .
 
-ex:Founders_Will a ex:Dominion_Battlecruisers ;
-    rdfs:label "Founder's Will" .
+ex:Goralis_Patrol_Cruiser a ex:Cardassian_Galor-Class_Ships ;
+    rdfs:label "Goralis Patrol Cruiser" .
 
-ex:Galor-Type_Command_Cruiser a ex:Cardassian_Galor-Class_Ships ;
-    rdfs:label "Galor-Type Command Cruiser" .
-
-ex:Gorath_IV a ex:Quarantined_Planets ;
-    rdfs:label "Gorath IV" .
-
-ex:Gowron a ex:Alien_Species_Representatives ;
-    rdfs:label "Gowron" .
-
-ex:Graviton_Flux_Drive a ex:Propulsion_Systems ;
-    rdfs:label "Graviton Flux Drive" .
-
-ex:Greeds_Gambit a ex:Ferengi_Marauders ;
-    rdfs:label "Greed's Gambit" .
-
-ex:Hailing_Frequencies_Modulator a ex:Communication_Systems ;
-    rdfs:label "Hailing Frequencies Modulator" .
+ex:Harvest_Cube a ex:Borg_Cubes ;
+    rdfs:label "Harvest Cube" .
 
 ex:Horta a ex:Non-Humanoids ;
     rdfs:label "Horta" .
 
-ex:Hydroformers_of_Aquor a ex:Aquatic_Species ;
-    rdfs:label "Hydroformers of Aquor" .
-
-ex:IRW_Aelahl a ex:Romulan_Warbirds ;
-    rdfs:label "IRW Aelahl" .
-
-ex:IRW_Dderidex a ex:Romulan_Warbirds ;
-    rdfs:label "IRW D'deridex" .
-
-ex:IRW_Khazara a ex:Romulan_Warbirds ;
-    rdfs:label "IRW Khazara" .
-
-ex:IRW_TKoreth a ex:Romulan_Warbirds ;
-    rdfs:label "IRW T'Koreth" .
-
-ex:IRW_TVeran a ex:Romulan_Warbirds ;
-    rdfs:label "IRW T'Veran" .
-
-ex:IRW_Vrenak a ex:Romulan_Warbirds ;
-    rdfs:label "IRW Vrenak" .
-
-ex:Iconia a ex:Ancient_Civilizations_Planets ;
-    rdfs:label "Iconia" .
-
-ex:Introduction_to_the_Borg_Collective a ex:First_Contact_Events ;
-    rdfs:label "Introduction to the Borg Collective" .
+ex:Infiltration_Cube a ex:Borg_Cubes ;
+    rdfs:label "Infiltration Cube" .
 
 ex:Isomagnetic_Disintegrator a ex:Weapons ;
     rdfs:label "Isomagnetic Disintegrator" .
+
+ex:Kelvinar_Prime a ex:Neutral_Zone_Planets ;
+    rdfs:label "Kelvinar Prime" .
 
 ex:Klingon_High_Council a ex:Non-Federation_Organizations ;
     rdfs:label "Klingon High Council" .
@@ -396,32 +232,11 @@ ex:Klingon_High_Council a ex:Non-Federation_Organizations ;
 ex:Klingons a ex:Humanoids ;
     rdfs:label "Klingons" .
 
-ex:Kohlinar_Monastery a ex:Religious_Orders ;
-    rdfs:label "Kohlinar Monastery" .
-
-ex:Kovath_II a ex:Neutral_Zone_Planets ;
-    rdfs:label "Kovath II" .
-
-ex:Kren_Volar a ex:Civilians_and_Non-Starfleet_Personnel ;
-    rdfs:label "Kren Volar" .
-
-ex:Latinum_Seeker a ex:Ferengi_Marauders ;
-    rdfs:label "Latinum Seeker" .
-
-ex:Lwaxana_Troi a ex:Alien_Species_Representatives ;
-    rdfs:label "Lwaxana Troi" .
-
-ex:Medical_Officers a ex:Starfleet_Officers ;
-    rdfs:label "Medical Officers" .
+ex:Kohlinar_Order a ex:Religious_Orders ;
+    rdfs:label "Kohlinar Order" .
 
 ex:Medusans a ex:Non-Humanoids ;
     rdfs:label "Medusans" .
-
-ex:Metaphasic_Shield a ex:Energy_Shields ;
-    rdfs:label "Metaphasic Shield" .
-
-ex:Metrons a ex:Energy_Beings ;
-    rdfs:label "Metrons" .
 
 ex:Monks_of_Boreth a ex:Religious_Orders ;
     rdfs:label "Monks of Boreth" .
@@ -438,11 +253,14 @@ ex:New_Bajor a ex:Colony_Worlds ;
 ex:Order_of_the_Prophets a ex:Religious_Orders ;
     rdfs:label "Order of the Prophets" .
 
-ex:Organians a ex:Energy_Beings ;
-    rdfs:label "Organians" .
+ex:Organian_Energy_Beings a ex:Transdimensional_Beings ;
+    rdfs:label "Organian Energy Beings" .
 
 ex:Osteogenic_Stimulator a ex:Medical_Devices ;
     rdfs:label "Osteogenic Stimulator" .
+
+ex:Personal_Force_Fields a ex:Energy_Shields ;
+    rdfs:label "Personal Force Fields" .
 
 ex:Phaser a ex:Weapons ;
     rdfs:label "Phaser" .
@@ -450,29 +268,32 @@ ex:Phaser a ex:Weapons ;
 ex:Photon_Torpedo a ex:Weapons ;
     rdfs:label "Photon Torpedo" .
 
-ex:Polarized_Shield_Matrix a ex:Energy_Shields ;
-    rdfs:label "Polarized Shield Matrix" .
+ex:Photonic_Wraiths a ex:Energy-Based_Entities ;
+    rdfs:label "Photonic Wraiths" .
 
-ex:Polaron_Beam a ex:Weapons ;
-    rdfs:label "Polaron Beam" .
+ex:Planetary_Defense_Grids a ex:Energy_Shields ;
+    rdfs:label "Planetary Defense Grids" .
 
-ex:Profits_Venture a ex:Ferengi_Marauders ;
-    rdfs:label "Profit's Venture" .
+ex:Plasma_Sentinels a ex:Energy-Based_Entities ;
+    rdfs:label "Plasma Sentinels" .
+
+ex:Prophets_of_Bajor a ex:Transdimensional_Beings ;
+    rdfs:label "Prophets of Bajor" .
+
+ex:Q_Continuum_Entities a ex:Transdimensional_Beings ;
+    rdfs:label "Q Continuum Entities" .
 
 ex:QonoS a ex:Non-Federation_Planets ;
     rdfs:label "Qo'noS" .
 
-ex:Quantum_Cube a ex:Borg_Cubes ;
-    rdfs:label "Quantum Cube" .
+ex:Quantum_Entanglement_Communicator a ex:Communication_Systems ;
+    rdfs:label "Quantum Entanglement Communicator" .
 
-ex:Quantum_Resonance_Barrier a ex:Energy_Shields ;
-    rdfs:label "Quantum Resonance Barrier" .
+ex:Quantum_Luminants a ex:Energy-Based_Entities ;
+    rdfs:label "Quantum Luminants" .
 
 ex:Regeneration_Cube a ex:Borg_Cubes ;
     rdfs:label "Regeneration Cube" .
-
-ex:Regenerative_Shield a ex:Energy_Shields ;
-    rdfs:label "Regenerative Shield" .
 
 ex:Risa a ex:Class_M_Planets ;
     rdfs:label "Risa" .
@@ -483,11 +304,8 @@ ex:Romulan_Tal_Shiar a ex:Non-Federation_Organizations ;
 ex:Romulus a ex:Non-Federation_Planets ;
     rdfs:label "Romulus" .
 
-ex:Sargons_World a ex:Ancient_Civilizations_Planets ;
-    rdfs:label "Sargon's World" .
-
-ex:Seleya a ex:Vulcan_Science_Vessels ;
-    rdfs:label "Seleya" .
+ex:Rura_Penthe a ex:Non-Federation_Planets ;
+    rdfs:label "Rura Penthe" .
 
 ex:Soliton_Wave_Drive a ex:Propulsion_Systems ;
     rdfs:label "Soliton Wave Drive" .
@@ -495,53 +313,26 @@ ex:Soliton_Wave_Drive a ex:Propulsion_Systems ;
 ex:Soong-Type_Android a ex:Artificial_Lifeforms ;
     rdfs:label "Soong-Type Android" .
 
-ex:Sovak a ex:Vulcan_Science_Vessels ;
-    rdfs:label "Sovak" .
-
 ex:Starfleet a ex:Federation_Organizations ;
     rdfs:label "Starfleet" .
 
-ex:Stealth_Cube a ex:Borg_Cubes ;
-    rdfs:label "Stealth Cube" .
+ex:Stationary_Shield_Generators a ex:Energy_Shields ;
+    rdfs:label "Stationary Shield Generators" .
 
 ex:Subspace_Transceiver_Array a ex:Communication_Systems ;
     rdfs:label "Subspace Transceiver Array" .
 
-ex:Suraks_Path a ex:Vulcan_Science_Vessels ;
-    rdfs:label "Surak's Path" .
-
-ex:TKon_Prime a ex:Ancient_Civilizations_Planets ;
-    rdfs:label "T'Kon Prime" .
-
-ex:TPlana-Hath a ex:Vulcan_Science_Vessels ;
-    rdfs:label "T'Plana-Hath" .
-
-ex:TRaan a ex:Vulcan_Science_Vessels ;
-    rdfs:label "T'Raan" .
-
-ex:Targ-class_Patrol_Ship a ex:Klingon_Starships ;
-    rdfs:label "Targ-class Patrol Ship" .
+ex:Tarsis_IV a ex:Neutral_Zone_Planets ;
+    rdfs:label "Tarsis IV" .
 
 ex:Temporal_Anomaly_Research_Division a ex:Temporal_Organizations ;
     rdfs:label "Temporal Anomaly Research Division" .
 
-ex:Temporal_Loop_of_Devron a ex:Temporal_Incidents ;
-    rdfs:label "Temporal Loop of Devron" .
-
 ex:Terra_Nova a ex:Colony_Worlds ;
     rdfs:label "Terra Nova" .
 
-ex:Tetryon_Pulse_Launcher a ex:Weapons ;
-    rdfs:label "Tetryon Pulse Launcher" .
-
-ex:Thasians a ex:Energy_Beings ;
-    rdfs:label "Thasians" .
-
 ex:Tholians a ex:Non-Humanoids ;
     rdfs:label "Tholians" .
-
-ex:Trader_Grelak a ex:Civilians_and_Non-Starfleet_Personnel ;
-    rdfs:label "Trader Grelak" .
 
 ex:Trager-Class_Variant a ex:Cardassian_Galor-Class_Ships ;
     rdfs:label "Trager-Class Variant" .
@@ -549,11 +340,8 @@ ex:Trager-Class_Variant a ex:Cardassian_Galor-Class_Ships ;
 ex:Transwarp_Drive a ex:Propulsion_Systems ;
     rdfs:label "Transwarp Drive" .
 
-ex:Trill a ex:Federation_Planets ;
-    rdfs:label "Trill" .
-
-ex:USS_Aventine a ex:Federation_Starships ;
-    rdfs:label "USS Aventine" .
+ex:USS_Discovery a ex:Federation_Starships ;
+    rdfs:label "USS Discovery" .
 
 ex:USS_Enterprise a ex:Federation_Starships ;
     rdfs:label "USS Enterprise" .
@@ -561,26 +349,11 @@ ex:USS_Enterprise a ex:Federation_Starships ;
 ex:USS_Excelsior a ex:Federation_Starships ;
     rdfs:label "USS Excelsior" .
 
-ex:USS_Stargazer a ex:Federation_Starships ;
-    rdfs:label "USS Stargazer" .
-
-ex:USS_Titan a ex:Federation_Starships ;
-    rdfs:label "USS Titan" .
-
 ex:USS_Voyager a ex:Federation_Starships ;
     rdfs:label "USS Voyager" .
 
 ex:Universal_Translator_Matrix a ex:Communication_Systems ;
     rdfs:label "Universal Translator Matrix" .
-
-ex:VLar a ex:Vulcan_Science_Vessels ;
-    rdfs:label "V'Lar" .
-
-ex:Varnis_IV a ex:Neutral_Zone_Planets ;
-    rdfs:label "Varnis IV" .
-
-ex:Vorlax_IV a ex:Uncharted_Planets ;
-    rdfs:label "Vorlax IV" .
 
 ex:Vulcan a ex:Federation_Planets ;
     rdfs:label "Vulcan" .
@@ -591,20 +364,8 @@ ex:Vulcans a ex:Humanoids ;
 ex:Warp_Drive a ex:Propulsion_Systems ;
     rdfs:label "Warp Drive" .
 
-ex:Wealth_Harvester a ex:Ferengi_Marauders ;
-    rdfs:label "Wealth Harvester" .
-
-ex:Xenara_Prime a ex:Quarantined_Planets ;
-    rdfs:label "Xenara Prime" .
-
-ex:Xytheron_Prime a ex:Uncharted_Planets ;
-    rdfs:label "Xytheron Prime" .
-
-ex:Zarathian_Reef_Dwellers a ex:Aquatic_Species ;
-    rdfs:label "Zarathian Reef Dwellers" .
-
-ex:Zerath_Prime a ex:Neutral_Zone_Planets ;
-    rdfs:label "Zerath Prime" .
+ex:Zarnath_VII a ex:Neutral_Zone_Planets ;
+    rdfs:label "Zarnath VII" .
 
 ex:Andoria a ex:Federation_Planets ;
     rdfs:label "Andoria" .
@@ -612,23 +373,11 @@ ex:Andoria a ex:Federation_Planets ;
 ex:Andorians a ex:Humanoids ;
     rdfs:label "Andorians" .
 
-ex:Assimilation_Cube a ex:Borg_Cubes ;
-    rdfs:label "Assimilation Cube" .
+ex:Coaxial_Warp_Drive a ex:Propulsion_Systems ;
+    rdfs:label "Coaxial Warp Drive" .
 
-ex:Cait a ex:Federation_Planets ;
-    rdfs:label "Cait" .
-
-ex:Commanding_Officers a ex:Starfleet_Officers ;
-    rdfs:label "Commanding Officers" .
-
-ex:Commerce_Raider a ex:Ferengi_Marauders ;
-    rdfs:label "Commerce Raider" .
-
-ex:Dominion_War_Battles a ex:Federation-Hostile_Engagements ;
-    rdfs:label "Dominion War Battles" .
-
-ex:Federation_Cultural_Exchange_Program a ex:Federation_Organizations ;
-    rdfs:label "Federation Cultural Exchange Program" .
+ex:Farius_Prime_Underworld a ex:Criminal_Syndicates ;
+    rdfs:label "Farius Prime Underworld" .
 
 ex:Federation_Diplomatic_Corps a ex:Federation_Organizations ;
     rdfs:label "Federation Diplomatic Corps" .
@@ -636,84 +385,39 @@ ex:Federation_Diplomatic_Corps a ex:Federation_Organizations ;
 ex:Federation_Science_Bureau a ex:Federation_Organizations ;
     rdfs:label "Federation Science Bureau" .
 
-ex:Federation_Security_Agency a ex:Federation_Organizations ;
-    rdfs:label "Federation Security Agency" .
+ex:Keldon-Refit_Prototype a ex:Cardassian_Galor-Class_Ships ;
+    rdfs:label "Keldon-Refit Prototype" .
 
-ex:Federation_Trade_Commission a ex:Federation_Organizations ;
-    rdfs:label "Federation Trade Commission" .
+ex:Ktinga a ex:Klingon_Starships ;
+    rdfs:label "K't'inga" .
 
-ex:Gamma_Vanguard a ex:Dominion_Battlecruisers ;
-    rdfs:label "Gamma Vanguard" .
+ex:Mogai-class_Warbird a ex:Romulan_Warbirds ;
+    rdfs:label "Mogai-class Warbird" .
 
-ex:IRW_DRavik a ex:Romulan_Warbirds ;
-    rdfs:label "IRW D'Ravik" .
-
-ex:IRW_Sharien a ex:Romulan_Warbirds ;
-    rdfs:label "IRW S'harien" .
-
-ex:IRW_Valdore a ex:Romulan_Warbirds ;
-    rdfs:label "IRW Valdore" .
-
-ex:JemHadars_Fury a ex:Dominion_Battlecruisers ;
-    rdfs:label "Jem'Hadar's Fury" .
-
-ex:Keldon-Refit_Galor a ex:Cardassian_Galor-Class_Ships ;
-    rdfs:label "Keldon-Refit Galor" .
-
-ex:Ketracels_Edge a ex:Dominion_Battlecruisers ;
-    rdfs:label "Ketracel's Edge" .
-
-ex:Ktinga-class_Battle_Cruiser a ex:Klingon_Starships ;
-    rdfs:label "K't'inga-class Battle Cruiser" .
-
-ex:Obsidian_Spear a ex:Dominion_Battlecruisers ;
-    rdfs:label "Obsidian Spear" .
-
-ex:Qoj-class_Destroyer a ex:Klingon_Starships ;
-    rdfs:label "Qoj-class Destroyer" .
+ex:Nausicaan_Raiders a ex:Criminal_Syndicates ;
+    rdfs:label "Nausicaan Raiders" .
 
 ex:Quantum_Slipstream_Drive a ex:Propulsion_Systems ;
     rdfs:label "Quantum Slipstream Drive" .
 
-ex:Rigelian_Black_Market_Alliance a ex:Criminal_Syndicates ;
-    rdfs:label "Rigelian Black Market Alliance" .
+ex:Scimitar-class_Warbird a ex:Romulan_Warbirds ;
+    rdfs:label "Scimitar-class Warbird" .
 
-ex:Sarek_of_Vulcan a ex:Alien_Species_Representatives ;
-    rdfs:label "Sarek of Vulcan" .
-
-ex:Science_Officers a ex:Starfleet_Officers ;
-    rdfs:label "Science Officers" .
-
-ex:Subspace_Tunneling_Drive a ex:Propulsion_Systems ;
-    rdfs:label "Subspace Tunneling Drive" .
+ex:TVaro-class_Warbird a ex:Romulan_Warbirds ;
+    rdfs:label "T'Varo-class Warbird" .
 
 ex:Tactical_Cube a ex:Borg_Cubes ;
     rdfs:label "Tactical Cube" .
 
-ex:Tarsis_Beta a ex:Quarantined_Planets ;
-    rdfs:label "Tarsis Beta" .
+ex:Trill a ex:Federation_Planets ;
+    rdfs:label "Trill" .
 
 ex:USS_Defiant a ex:Federation_Starships ;
     rdfs:label "USS Defiant" .
 
-ex:Veqlargh-class_Dreadnought a ex:Klingon_Starships ;
-    rdfs:label "Veqlargh-class Dreadnought" .
+ex:Valdore-type_Warbird a ex:Romulan_Warbirds ;
+    rdfs:label "Valdore-type Warbird" .
 
-ex:Vorcha-class_Attack_Cruiser a ex:Klingon_Starships ;
-    rdfs:label "Vor'cha-class Attack Cruiser" .
-
-ex:Vortas_Wrath a ex:Dominion_Battlecruisers ;
-    rdfs:label "Vorta's Wrath" .
-
-ex:Federation_Medical_Corps a ex:Federation_Organizations ;
-    rdfs:label "Federation Medical Corps" .
-
-ex:Klingon-Federation_Skirmishes a ex:Federation-Hostile_Engagements ;
-    rdfs:label "Klingon-Federation Skirmishes" .
-
-ex:USS_Discovery a ex:Federation_Starships ;
-    rdfs:label "USS Discovery" .
-
-ex:Borg_Incursions a ex:Federation-Hostile_Engagements ;
-    rdfs:label "Borg Incursions" .
+ex:Vorcha a ex:Klingon_Starships ;
+    rdfs:label "Vor'cha" .
 

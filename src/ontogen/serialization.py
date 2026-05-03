@@ -64,6 +64,21 @@ class SerializationMixin:
             term = node_attrs.get("term", node_id)
             level_name = node_attrs.get("level")
 
+            if level_name:
+                try:
+                    level = self._get_level(level_name)
+                    if getattr(level, "is_lexical", False):
+                        logger.debug(
+                            "Skipping lexical node '%s' during RDF serialization",
+                            term,
+                        )
+                        continue
+                except ValueError:
+                    logger.warning(
+                        "Level '%s' not found in schema; continuing serialization",
+                        level_name,
+                    )
+
             node_uri = self._sanitize_uri(term)
             g.add((node_uri, RDFS.label, Literal(term)))
 
@@ -90,11 +105,32 @@ class SerializationMixin:
         for parent_id, child_id in self.ontology_graph.edges():
             edge_attrs = self.ontology_graph.edges[parent_id, child_id]
             relation = edge_attrs.get("relation")
+            parent_attrs = self.ontology_graph.nodes[parent_id]
+            parent_level_name = parent_attrs.get("level")
             child_attrs = self.ontology_graph.nodes[child_id]
             child_level_name = child_attrs.get("level")
 
+            skip_edge = False
+            for level_name in (parent_level_name, child_level_name):
+                if not level_name:
+                    continue
+                try:
+                    level = self._get_level(level_name)
+                except ValueError:
+                    continue
+                if getattr(level, "is_lexical", False):
+                    skip_edge = True
+                    break
+            if skip_edge:
+                logger.debug(
+                    "Skipping lexical edge '%s' -> '%s' during RDF serialization",
+                    parent_id,
+                    child_id,
+                )
+                continue
+
             parent_uri = self._sanitize_uri(
-                self.ontology_graph.nodes[parent_id].get("term", parent_id)
+                parent_attrs.get("term", parent_id)
             )
             child_uri = self._sanitize_uri(
                 self.ontology_graph.nodes[child_id].get("term", child_id)
