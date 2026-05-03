@@ -215,11 +215,6 @@ Launch the Gradio web interface:
 python -m app.main
 ```
 
-Or directly with Gradio:
-
-```bash
-gradio app/main.py
-```
 
 ## Configuration
 

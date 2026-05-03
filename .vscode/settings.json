@@ -1,8 +1,14 @@
 {
-    "python.defaultInterpreterPath": "/opt/conda/bin/python",
-    "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "chat.tools.terminal.autoApprove": {
-        "pytest": true
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit",
+      "source.fixAll.ruff": "explicit"
     }
+  },
+  "ruff.nativeServer": true,
+  "ruff.configurationPreference": "filesystemFirst",
+  "mypy-type-checker.args": ["--config-file=pyproject.toml"],
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
 }

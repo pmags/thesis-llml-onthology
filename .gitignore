@@ -1,6 +1,7 @@
 # PROJECT SPECIFIC
 tutorial/
 .env
+.venv/
 .github/
 
 # Byte-compiled / optimized / DLL files
