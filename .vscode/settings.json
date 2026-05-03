@@ -1,10 +1,10 @@
 {
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.formatOnSave": true,
+    "editor.formatOnSave": false,
     "editor.codeActionsOnSave": {
-      "source.organizeImports": "explicit",
-      "source.fixAll.ruff": "explicit"
+      "source.organizeImports": "never",
+      "source.fixAll.ruff": "never"
     }
   },
   "ruff.nativeServer": true,

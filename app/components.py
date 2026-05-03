@@ -1,10 +1,9 @@
 """Shared layout components for the Dash ontology application."""
 
 from __future__ import annotations
-
 from typing import Any, Dict, Iterable, List
-
 from dash import dcc, html
+import dash_bootstrap_components as dbc
 
 
 PAGE_LABELS = {
@@ -14,46 +13,133 @@ PAGE_LABELS = {
     "/export": "Export",
 }
 
+defaults = {
+        "exploration_constant": 2.0,
+        "max_iterations": 10,
+        "similarity_threshold": 0.5,
+        "confidence_threshold": 0.5,
+        "candidates_per_iteration": 20,
+        "cross_link_threshold": 70,
+        "retirement_limit": 3,
+        "initial_seed_terms": 5,
+        "max_workers": 5,
+    }
 
-def _nav_item(label: str, href: str, active: bool) -> html.Div:
-    """Build a sidebar navigation row."""
-    class_name = "nav-item"
-    if active:
-        class_name += " nav-item-active"
-    return html.Div(dcc.Link(label.upper(), href=href, className="nav-link"), className=class_name)
+def _generation_parameters_form() -> html.Div:
+    return html.Div(
+        className="generation-parameters-form",
+        children=[
+            html.Label("Exploration Constant", className="form-label"),
+            dbc.Input(
+                id="init-exploration-constant",
+                type="number",
+                value=defaults["exploration_constant"],
+                step=0.1,
+                className="text-input",
+            ),
+            html.Label("Max Iterations", className="form-label"),
+            dbc.Input(
+                id="init-max-iterations",
+                type="number",
+                value=defaults["max_iterations"],
+                min=1,
+                className="text-input",
+            ),
+            html.Label("Similarity Threshold", className="form-label"),
+            dbc.Input(
+                id="init-similarity-threshold",
+                type="number",
+                value=defaults["similarity_threshold"],
+                step=0.05,
+                min=0,
+                max=1,
+                className="text-input",
+            ),
+            html.Label("Candidates / Iteration", className="form-label"),
+            dbc.Input(
+                id="init-candidates-per-iteration",
+                type="number",
+                value=defaults["candidates_per_iteration"],
+                min=1,
+                className="text-input",
+            ),
+            html.Label("Cross-link Threshold", className="form-label"),
+            dbc.Input(
+                id="init-cross-link-threshold",
+                type="number",
+                value=defaults["cross_link_threshold"],
+                min=0,
+                max=100,
+                className="text-input",
+            ),
+            html.Label("Retirement Limit", className="form-label"),
+            dbc.Input(
+                id="init-retirement-limit",
+                type="number",
+                value=defaults["retirement_limit"],
+                min=1,
+                className="text-input",
+            ),
+            html.Label("Initial Seed Terms", className="form-label"),
+            dbc.Input(
+                id="init-initial-seed-terms",
+                type="number",
+                value=defaults["initial_seed_terms"],
+                min=1,
+                className="text-input",
+            ),
+            html.Label("Max Workers", className="form-label"),
+            dbc.Input(
+                id="init-max-workers",
+                type="number",
+                value=defaults["max_workers"],
+                min=1,
+                className="text-input",
+            ),
+        ]
+    )
 
 
-def create_sidebar(pathname: str) -> html.Div:
+def _create_sidebar_forms() -> html.Div:
+    return html.Div(
+        className="sidebar-forms",
+        children=[
+            dbc.Accordion(
+                [
+                    dbc.AccordionItem(
+                        [
+                            _generation_parameters_form()
+                        ],
+                        title="Generation Parameters",
+                    ),
+                    dbc.AccordionItem(
+                        [
+                            html.P("This is the content of the second section"),
+                            dbc.Button("Don't click me!", color="danger"),
+                        ],
+                        title="Model Provider",
+                    )
+                ],
+                start_collapsed=True  
+            )
+        ]
+    )
+
+def create_sidebar() -> html.Div:
     """Build the application sidebar."""
     return html.Div(
         className="sidebar",
         children=[
-            html.Div(
-                className="sidebar-brand",
-                children=[
-                    html.Div("ontogen", className="brand-title"),
-                ],
-            ),
-            html.Div(
-                className="sidebar-nav",
-                children=[
-                    _nav_item("Initialize", "/", pathname == "/"),
-                    _nav_item("Explorer", "/explorer", pathname == "/explorer"),
-                    _nav_item("Automation", "/automation", pathname == "/automation"),
-                    _nav_item("Export", "/export", pathname == "/export"),
-                ],
-            ),
-            html.Div(
-                className="sidebar-footer",
-                children=html.Button(
-                    "NEW ONTOLOGY",
-                    id="new-ontology-button",
-                    className="primary-button sidebar-button",
-                    type="button",
-                ),
-            ),
-        ],
+            html.H3("Ontogen", className="display-4"),
+            html.Hr(),
+            html.P("Ontology automatic generation", className="lead"),
+            _create_sidebar_forms(),
+            dbc.Button("Generate",id="generate-button", color="primary", className="mb-3 mt-4 w-100", n_clicks=0),
+
+        ]
     )
+
+
 
 
 def create_topbar(pathname: str | None) -> html.Div:

@@ -1,4 +1,5 @@
 :root {
+  /* colors */
   --bg-dark: #0b0f17;
   --bg-panel: #111827;
   --bg-soft: #f3f4f6;
@@ -14,6 +15,7 @@
   --warning: #b45309;
 }
 
+
 * {
   box-sizing: border-box;
 }
@@ -21,7 +23,7 @@
 body {
   margin: 0;
   font-family: "IBM Plex Sans", Arial, sans-serif;
-  background: linear-gradient(180deg, #eef2f7 0%, #f8fafc 100%);
+  background: linear-gradient(180deg, #f8f9fa 0%, #f8fafc 100%);
   color: var(--text-main);
 }
 
@@ -30,18 +32,28 @@ body {
 }
 
 .sidebar {
-  background: var(--bg-dark);
+  /* background: var(--bg-dark);
   color: #fff;
   display: flex;
   flex-direction: column;
   gap: 24px;
   justify-content: flex-start;
-  left: 0;
   min-height: 100vh;
   padding: 28px 20px 24px;
+  top: 0;
+  width: 272px; */
   position: fixed;
   top: 0;
-  width: 272px;
+  left: 0;
+  bottom: 0;
+  width: 17rem;
+  padding: 1rem 1rem;
+  background-color: #f8f9fa;
+}
+
+.sidebar-forms{
+  padding-top: 20px;
+  padding-bottom: 20px;
 }
 
 .brand-title,
@@ -241,7 +253,7 @@ body {
   border: none;
   border-bottom: 1px solid #94a3b8;
   border-radius: 0;
-  font-family: "IBM Plex Sans", Arial, sans-serif;
+  /* font-family: "IBM Plex Sans", Arial, sans-serif; */
   font-size: 1rem;
   line-height: 1.35;
   min-height: 42px;
