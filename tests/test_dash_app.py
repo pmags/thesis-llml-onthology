@@ -13,7 +13,6 @@ if str(SRC_PATH) not in sys.path:
 
 from app.components import manual_expansion_progress_panel
 from app.cytoscape_utils import (
-    build_node_details,
     EXPAND_CONTEXT_MENU,
     EXPAND_CONTEXT_MENU_ID,
     graph_to_cytoscape,
@@ -76,19 +75,6 @@ def test_graph_to_cytoscape_maps_nodes_and_edges(mock_agent):
     assert any(item["classes"] == "class" for item in node_elements)
     assert any(item["data"]["label"] == "rdfs:subClassOf" for item in edge_elements)
     assert any(item["data"]["label"] == "rdf:type" for item in edge_elements)
-
-
-def test_build_node_details_reports_neighbors_and_rewards(mock_agent):
-    """Verify side-panel details include neighbors and computed mean reward."""
-    ontology = _build_sample_ontology(mock_agent)
-
-    details = build_node_details(ontology.ontology_graph, "Vulcans", ["Vulcans"])
-
-    assert details["term"] == "Vulcans"
-    assert details["parents"] == ["Species"]
-    assert details["children"] == ["Spock"]
-    assert details["expandable"] is True
-    assert details["mean_reward"] == 0.7
 
 
 def test_expand_context_menu_uses_cytoscape_context_menu_contract():

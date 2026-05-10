@@ -17,13 +17,6 @@ BOOTSTRAP_ICONS = "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/boot
 GRAPH_READY_STATUSES = {"completed", "manual", "manual_expanding", "ready", "stopped"}
 
 
-CONTENT_STYLE = {
-    "margin-left": "18rem",
-    "margin-right": "2rem",
-    "padding": "2rem 1rem",
-}
-
-
 def _debug_enabled() -> bool:
     """Return whether Dash debug mode is explicitly enabled."""
     return os.getenv("ONTOGEN_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -163,10 +156,6 @@ def create_app() -> Dash:
     def render_page_content(pathname):
         if pathname == "/":
             return ontology_explorer.layout()
-        elif pathname == "/page-1":
-            return html.P("This is the content of page 1. Yay!")
-        elif pathname == "/page-2":
-            return html.P("Oh cool, this is page 2!")
         # If the user tries to reach a different page, return a 404 message
         return html.Div(
             [
