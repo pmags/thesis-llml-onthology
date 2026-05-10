@@ -47,8 +47,18 @@ body {
   left: 0;
   bottom: 0;
   width: 17rem;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 1rem 1rem;
   background-color: #f8f9fa;
+  transition: transform 180ms ease;
+}
+
+.sidebar-container-hidden .sidebar {
+  pointer-events: none;
+  transform: translateX(-105%);
 }
 
 .sidebar-forms{
@@ -131,6 +141,36 @@ body {
   margin-left: 272px;
   min-width: 0;
   min-height: 100vh;
+  transition: margin-left 180ms ease;
+}
+
+.main-column-full {
+  margin-left: 0;
+}
+
+.sidebar-toggle-button {
+  align-items: center;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 38px;
+  justify-content: center;
+  padding: 0;
+  transition: background-color 180ms ease;
+  width: 38px;
+}
+
+.sidebar-toggle-button-expanded {
+  left: auto;
+}
+
+.sidebar-toggle-button-collapsed {
+  left: auto;
+}
+
+.sidebar-toggle-button .bi {
+  font-size: 1.05rem;
 }
 
 .topbar {
@@ -385,6 +425,114 @@ body {
   margin-top: 18px;
 }
 
+.graph-action-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.graph-info-button {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  min-height: 38px;
+  padding: 8px 14px;
+}
+
+.ontology-graph-panel {
+  background:
+    radial-gradient(circle at 16% 18%, rgba(191, 219, 254, 0.16), transparent 22%),
+    radial-gradient(circle at 82% 12%, rgba(187, 247, 208, 0.12), transparent 22%),
+    rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 24px;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.07);
+  padding: 14px;
+}
+
+.ontology-info-content {
+  display: grid;
+  gap: 22px;
+}
+
+.ontology-info-status {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.ontology-info-status-ok {
+  background: rgba(240, 253, 244, 0.82);
+  border-color: rgba(21, 128, 61, 0.28);
+}
+
+.ontology-info-status-warning {
+  background: rgba(255, 251, 235, 0.82);
+  border-color: rgba(180, 83, 9, 0.28);
+}
+
+.ontology-info-status-error {
+  background: rgba(254, 242, 242, 0.86);
+  border-color: rgba(220, 38, 38, 0.28);
+}
+
+.ontology-info-status-label {
+  font-family: "IBM Plex Sans Condensed", Arial, sans-serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: 8px;
+}
+
+.ontology-info-status-message {
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 8px 0 0;
+}
+
+.ontology-info-stat-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ontology-info-stat,
+.ontology-info-section {
+  background: rgba(248, 250, 252, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.ontology-info-value {
+  font-family: "IBM Plex Sans Condensed", Arial, sans-serif;
+  font-size: 1.45rem;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.ontology-info-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ontology-info-row {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-bottom: 8px;
+}
+
+.ontology-info-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
 .node-panel-body,
 .panel-section,
 .kv-grid {
@@ -481,8 +629,174 @@ body {
   white-space: pre-wrap;
 }
 
+.manual-expansion-progress {
+  display: grid;
+  gap: 14px;
+}
+
+.manual-expansion-log {
+  max-height: 280px;
+}
+
+.run-progress-section {
+  display: grid;
+  gap: 18px;
+}
+
+.run-progress-panel,
+.run-log-panel {
+  background:
+    radial-gradient(circle at 18% 20%, rgba(191, 219, 254, 0.18), transparent 24%),
+    radial-gradient(circle at 82% 10%, rgba(187, 247, 208, 0.16), transparent 22%),
+    rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 24px;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.07);
+  padding: 24px;
+}
+
+.run-progress-bar.progress {
+  background-color: rgba(226, 232, 240, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  height: 18px;
+  overflow: hidden;
+}
+
+.run-progress-bar .progress-bar {
+  background-color: #9eea2c;
+  color: #0f172a;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+}
+
+.run-progress-section .metric-row {
+  margin-top: 0;
+}
+
+.run-progress-section .metric-card {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.run-log-panel .log-console {
+  border-radius: 14px;
+  max-height: 360px;
+}
+
 .empty-state {
   max-width: 720px;
+}
+
+.explorer-onboarding {
+  display: grid;
+  min-height: calc(100vh - 96px);
+}
+
+.onboarding-step-index {
+  color: var(--text-muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.onboarding-stage {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(191, 219, 254, 0.24), transparent 22%),
+    radial-gradient(circle at 80% 30%, rgba(187, 247, 208, 0.2), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.88));
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 36px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px;
+}
+
+.onboarding-sequence {
+  display: grid;
+  gap: 0;
+  margin: 0 auto;
+  max-width: 980px;
+  position: relative;
+}
+
+.onboarding-sequence::before {
+  background: rgba(148, 163, 184, 0.35);
+  bottom: 34px;
+  content: "";
+  left: 40px;
+  position: absolute;
+  top: 34px;
+  width: 1px;
+}
+
+.onboarding-step-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 64px minmax(0, 1fr);
+  margin-bottom: 14px;
+  min-height: 0;
+  padding: 18px 24px;
+  position: relative;
+}
+
+.onboarding-step-card:last-child {
+  margin-bottom: 0;
+}
+
+.onboarding-step-marker {
+  align-items: flex-start;
+  display: flex;
+  justify-content: center;
+}
+
+.onboarding-step-index {
+  background: rgba(241, 245, 249, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 42px;
+  padding: 7px 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.onboarding-step-content {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.onboarding-step-title {
+  font-family: "IBM Plex Sans Condensed", Arial, sans-serif;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 8px;
+}
+
+.onboarding-step-copy {
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.theme-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 @media (max-width: 1100px) {
@@ -494,13 +808,43 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .onboarding-stage {
+    min-height: auto;
+    padding: 24px;
+    height: auto;
+  }
+
+  .onboarding-sequence {
+    max-width: none;
+  }
+
+  .onboarding-step-card {
+    grid-template-columns: 52px minmax(0, 1fr);
+    padding: 16px;
+  }
+
+  .onboarding-sequence::before {
+    left: 26px;
+  }
+
   .sidebar {
     position: relative;
     width: 100%;
     min-height: auto;
   }
 
+  .sidebar-container-hidden .sidebar {
+    display: none;
+    transform: none;
+  }
+
   .main-column {
     margin-left: 0;
+  }
+
+  .sidebar-toggle-button,
+  .sidebar-toggle-button-expanded,
+  .sidebar-toggle-button-collapsed {
+    left: auto;
   }
 }

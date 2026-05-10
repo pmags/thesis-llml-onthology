@@ -194,6 +194,7 @@ class AppState:
     ontology: Optional[Ontology] = None
     initialization_thread: Optional[threading.Thread] = None
     generation_thread: Optional[threading.Thread] = None
+    manual_expansion_thread: Optional[threading.Thread] = None
     generation_status: str = "idle"
     pause_event: threading.Event = field(default_factory=threading.Event)
     stop_event: threading.Event = field(default_factory=threading.Event)
@@ -206,11 +207,15 @@ class AppState:
     last_error: Optional[str] = None
     last_message: str = "Awaiting ontology initialization."
     started_at_monotonic: Optional[float] = None
+    finished_elapsed_seconds: Optional[float] = None
     plateau_count: int = 0
     stagnation_count: int = 0
     productive_rewards: List[float] = field(default_factory=list)
     previous_node_count: int = 0
     initialization_token: int = 0
+    auto_start_generation: bool = False
+    manual_expansion_node: Optional[str] = None
+    manual_expansion_previous_status: str = "ready"
 
     def reset(self) -> None:
         """Clear the active ontology and stop any background work."""
@@ -220,6 +225,7 @@ class AppState:
             self.ontology = None
             self.initialization_thread = None
             self.generation_thread = None
+            self.manual_expansion_thread = None
             self.generation_status = "idle"
             self.pause_event.clear()
             self.stop_event.clear()
@@ -229,10 +235,14 @@ class AppState:
             self.last_error = None
             self.last_message = "Awaiting ontology initialization."
             self.started_at_monotonic = None
+            self.finished_elapsed_seconds = None
             self.plateau_count = 0
             self.stagnation_count = 0
             self.productive_rewards = []
             self.previous_node_count = 0
+            self.auto_start_generation = False
+            self.manual_expansion_node = None
+            self.manual_expansion_previous_status = "ready"
         self.clear_logs()
 
     def has_ontology(self) -> bool:
@@ -369,6 +379,7 @@ class AppState:
         ontology = bundle["ontology"]
         self.ontology = ontology
         self.generation_thread = None
+        self.manual_expansion_thread = None
         self.generation_status = "ready"
         self.pause_event.clear()
         self.stop_event.clear()
@@ -377,7 +388,6 @@ class AppState:
         self.seed_summary = bundle["seed_summary"]
         self.last_error = None
         self.last_message = bundle["message"]
-        self.started_at_monotonic = None
         self.plateau_count = 0
         self.stagnation_count = 0
         self.productive_rewards = []
@@ -401,6 +411,7 @@ class AppState:
         retirement_limit: int,
         initial_seed_terms: int,
         max_workers: int,
+        auto_start_generation: bool = False,
     ) -> str:
         """Start ontology initialization in the background so UI logs can stream live."""
         clean_domain = domain.strip()
@@ -439,6 +450,7 @@ class AppState:
             self.ontology = None
             self.initialization_thread = None
             self.generation_thread = None
+            self.manual_expansion_thread = None
             self.generation_status = "initializing"
             self.pause_event.clear()
             self.stop_event.clear()
@@ -448,10 +460,14 @@ class AppState:
             self.last_error = None
             self.last_message = f"Initializing '{clean_domain}'. Live logs will appear below."
             self.started_at_monotonic = time.monotonic()
+            self.finished_elapsed_seconds = None
             self.plateau_count = 0
             self.stagnation_count = 0
             self.productive_rewards = []
             self.previous_node_count = 0
+            self.auto_start_generation = auto_start_generation
+            self.manual_expansion_node = None
+            self.manual_expansion_previous_status = "ready"
 
             thread = threading.Thread(
                 target=self._initialization_loop,
@@ -486,6 +502,7 @@ class AppState:
         max_workers: int,
     ) -> None:
         """Run ontology initialization in a background thread."""
+        current_thread = threading.current_thread()
         try:
             bundle = self._build_initialization_bundle(
                 domain=domain,
@@ -512,16 +529,92 @@ class AppState:
                     self.last_message = f"Initialization failed: {exc}"
                     self.generation_status = "error"
                     self.initialization_thread = None
-                    self.started_at_monotonic = None
+                    self._freeze_elapsed_locked()
             return
 
         with self.lock:
             if token != self.initialization_token:
                 return
             self._commit_initialization_bundle_locked(bundle)
-            self.initialization_thread = None
+            should_auto_start = self.auto_start_generation
+            if not should_auto_start:
+                self._freeze_elapsed_locked()
 
         APP_LOGGER.info("Ontology initialization completed for '%s'", domain)
+        if should_auto_start:
+            try:
+                self.start_generation()
+            except APP_HANDLED_ERRORS as exc:
+                APP_LOGGER.error("Automatic generation could not start: %s", exc)
+                with self.lock:
+                    if token == self.initialization_token:
+                        self.last_error = str(exc)
+                        self.last_message = f"Generation failed to start: {exc}"
+                        self.generation_status = "error"
+        with self.lock:
+            if self.initialization_thread is current_thread:
+                self.initialization_thread = None
+
+    def start_run(
+        self,
+        *,
+        domain: str,
+        provider: str,
+        api_key: Optional[str],
+        model: Optional[str],
+        scope_description: str,
+        sub_domains: str,
+        exploration_constant: float,
+        max_iterations: int,
+        similarity_threshold: float,
+        confidence_threshold: float,
+        candidates_per_iteration: int,
+        cross_link_threshold: float,
+        retirement_limit: int,
+        initial_seed_terms: int,
+        max_workers: int,
+        automatic: bool,
+    ) -> str:
+        """Start a new ontology run and optionally continue into automatic expansion."""
+        return self.start_initialization(
+            domain=domain,
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            scope_description=scope_description,
+            sub_domains=sub_domains,
+            exploration_constant=exploration_constant,
+            max_iterations=max_iterations,
+            similarity_threshold=similarity_threshold,
+            confidence_threshold=confidence_threshold,
+            candidates_per_iteration=candidates_per_iteration,
+            cross_link_threshold=cross_link_threshold,
+            retirement_limit=retirement_limit,
+            initial_seed_terms=initial_seed_terms,
+            max_workers=max_workers,
+            auto_start_generation=automatic,
+        )
+
+    def stop_run(self) -> str:
+        """Request that the active initialization or generation run stop."""
+        set_runtime_log_sink(self.append_log_line)
+        with self.lock:
+            status = self.generation_status
+            if status not in {"initializing", "running", "paused", "manual_expanding"}:
+                return status
+
+            self.initialization_token += 1
+            self.stop_event.set()
+            self.pause_event.clear()
+            self.initialization_thread = None
+            self.generation_status = "stopped"
+            self.last_message = "Ontogen run stop requested."
+            self.auto_start_generation = False
+            self.manual_expansion_thread = None
+            self._freeze_elapsed_locked()
+
+        APP_LOGGER.info("Ontogen run stop requested")
+        return "stopped"
 
     def initialize_ontology(
         self,
@@ -569,6 +662,7 @@ class AppState:
             self.initialization_thread = None
             self.generation_thread = None
             self._commit_initialization_bundle_locked(bundle)
+            self._freeze_elapsed_locked()
         return self.seed_summary.copy()
 
     def snapshot(self) -> Dict[str, Any]:
@@ -581,8 +675,12 @@ class AppState:
                 "has_ontology": ontology is not None,
                 "domain": ontology.domain if ontology is not None else "",
                 "generation_status": self.generation_status,
+                "auto_start_generation": self.auto_start_generation,
                 "initialization_active": self.initialization_thread is not None
                 and self.initialization_thread.is_alive(),
+                "manual_expansion_active": self.manual_expansion_thread is not None
+                and self.manual_expansion_thread.is_alive(),
+                "manual_expansion_node": self.manual_expansion_node,
                 "iteration_log": [entry.as_dict() for entry in self.iteration_log],
                 "last_error": self.last_error,
                 "last_message": self.last_message,
@@ -628,6 +726,94 @@ class AppState:
         except APP_HANDLED_ERRORS as exc:
             raise RuntimeError(str(exc)) from exc
 
+    def start_manual_expansion(self, node: str) -> str:
+        """Start a single manual node expansion in the background."""
+        clean_node = str(node).strip()
+        if not clean_node:
+            raise ValueError("A node is required for manual expansion.")
+
+        self.clear_logs()
+        set_runtime_log_sink(self.append_log_line)
+        with self.lock:
+            if self.ontology is None:
+                raise RuntimeError("No ontology has been initialized yet.")
+            if self.initialization_thread is not None and self.initialization_thread.is_alive():
+                raise RuntimeError("Ontology initialization is still running.")
+            if self.generation_thread is not None and self.generation_thread.is_alive():
+                raise RuntimeError("Automatic generation is still running.")
+            if self.manual_expansion_thread is not None and self.manual_expansion_thread.is_alive():
+                raise RuntimeError("A manual expansion is already running.")
+            if clean_node not in self.ontology.ontology_graph:
+                raise ValueError(f"Node '{clean_node}' not found in graph")
+            if clean_node not in {str(item) for item in self.ontology.list_expandable_nodes()}:
+                raise ValueError(f"Node '{clean_node}' is not expandable.")
+
+            self.manual_expansion_previous_status = (
+                self.generation_status
+                if self.generation_status in {"ready", "manual", "completed", "stopped"}
+                else "manual"
+            )
+            self.generation_status = "manual_expanding"
+            self.manual_expansion_node = clean_node
+            self.last_error = None
+            self.last_message = f"Expanding '{clean_node}'. Live logs are streaming."
+            self.started_at_monotonic = time.monotonic()
+            self.finished_elapsed_seconds = None
+
+            thread = threading.Thread(
+                target=self._manual_expansion_loop,
+                args=(clean_node,),
+                name="dash-manual-node-expansion",
+                daemon=True,
+            )
+            self.manual_expansion_thread = thread
+
+        APP_LOGGER.info("Manual expansion started for node '%s'", clean_node)
+        thread.start()
+        return "manual_expanding"
+
+    def _manual_expansion_loop(self, node: str) -> None:
+        """Run one manual node expansion and commit the result when it completes."""
+        current_thread = threading.current_thread()
+        try:
+            with self.lock:
+                ontology = self.ontology
+            if ontology is None:
+                raise RuntimeError("No ontology available for manual expansion.")
+
+            result = ontology.expand_node(node)
+        except APP_HANDLED_ERRORS as exc:
+            APP_LOGGER.error("Manual expansion failed for node '%s': %s", node, exc)
+            with self.lock:
+                if self.manual_expansion_thread is current_thread:
+                    self.last_error = str(exc)
+                    self.last_message = f"Manual expansion failed: {exc}"
+                    self.generation_status = self.manual_expansion_previous_status
+                    self.manual_expansion_thread = None
+                    self._freeze_elapsed_locked()
+            return
+
+        with self.lock:
+            if self.manual_expansion_thread is not current_thread or self.ontology is not ontology:
+                return
+            entry = self._record_iteration_locked(result, status="manual")
+            self.generation_status = "manual"
+            self.last_error = None
+            self.last_message = (
+                f"Expanded '{node}': {entry.accepted}/{entry.generated} accepted. "
+                "Automatic mode is no longer available for this ontology instance."
+            )
+            self.manual_expansion_thread = None
+            self.manual_expansion_node = node
+            self._freeze_elapsed_locked()
+
+        APP_LOGGER.info(
+            "Manual expansion completed for node '%s': %d/%d accepted",
+            node,
+            int(result.get("candidates_accepted", 0) or 0),
+            int(result.get("candidates_generated", 0) or 0),
+        )
+
     def can_start_automatic(self) -> bool:
         """Return True when the current ontology instance still allows automatic mode."""
         with self.lock:
@@ -642,6 +828,8 @@ class AppState:
         with self.lock:
             if self.ontology is None:
                 raise RuntimeError("No ontology has been initialized yet.")
+            if self.manual_expansion_thread is not None and self.manual_expansion_thread.is_alive():
+                raise RuntimeError("Manual expansion is still running.")
             if getattr(self.ontology, "expansion_mode", None) == "manual":
                 raise RuntimeError(
                     "Automatic generation is unavailable after manual expansion. "
@@ -653,6 +841,7 @@ class AppState:
             self.stop_event.clear()
             self.pause_event.clear()
             self.generation_status = "running"
+            self.finished_elapsed_seconds = None
             self.last_error = None
             self.last_message = "Automatic generation started."
             if self.started_at_monotonic is None:
@@ -701,6 +890,7 @@ class AppState:
             if self.generation_status not in {"completed", "idle"}:
                 self.generation_status = "stopped"
                 self.last_message = "Automatic generation stopped."
+                self._freeze_elapsed_locked()
                 APP_LOGGER.info("Automatic generation stop requested")
 
         if wait and thread.is_alive():
@@ -719,6 +909,7 @@ class AppState:
                     self.generation_status = "stopped"
                     self.last_message = "Automatic generation stopped."
                     self.generation_thread = None
+                    self._freeze_elapsed_locked()
                 return
 
             if self.pause_event.is_set():
@@ -734,20 +925,40 @@ class AppState:
                         self.generation_status = "completed"
                         self.last_message = "Reached the configured maximum iteration count."
                         self.generation_thread = None
+                        self._freeze_elapsed_locked()
                         return
-                    result = ontology.expand_ontology()
+                result = ontology.expand_ontology()
+                if self.stop_event.is_set():
+                    with self.lock:
+                        self.generation_status = "stopped"
+                        self.last_message = "Automatic generation stopped."
+                        self.generation_thread = None
+                        self._freeze_elapsed_locked()
+                    return
+
+                with self.lock:
+                    if self.ontology is not ontology:
+                        return
                     entry = self._record_iteration_locked(result, status="running")
                     should_stop = self._should_stop_generation_locked(entry)
                     if should_stop:
                         self.generation_status = "completed"
                         self.generation_thread = None
+                        self._freeze_elapsed_locked()
                         return
             except APP_HANDLED_ERRORS as exc:
                 with self.lock:
+                    if self.stop_event.is_set():
+                        self.generation_status = "stopped"
+                        self.last_message = "Automatic generation stopped."
+                        self.generation_thread = None
+                        self._freeze_elapsed_locked()
+                        return
                     self.last_error = str(exc)
                     self.last_message = f"Generation failed: {exc}"
                     self.generation_status = "error"
                     self.generation_thread = None
+                    self._freeze_elapsed_locked()
                 return
 
     def _record_iteration_locked(
@@ -821,9 +1032,19 @@ class AppState:
 
     def _elapsed_seconds(self) -> float:
         """Return elapsed generation time in seconds."""
+        if self.finished_elapsed_seconds is not None:
+            return self.finished_elapsed_seconds
+        return self._current_elapsed_seconds()
+
+    def _current_elapsed_seconds(self) -> float:
+        """Return the live elapsed time without considering a frozen value."""
         if self.started_at_monotonic is None:
             return 0.0
         return round(time.monotonic() - self.started_at_monotonic, 2)
+
+    def _freeze_elapsed_locked(self) -> None:
+        """Freeze elapsed time when a run reaches a terminal state."""
+        self.finished_elapsed_seconds = self._current_elapsed_seconds()
 
 
 APP_STATE = AppState()

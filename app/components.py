@@ -55,6 +55,16 @@ def _generation_parameters_form() -> html.Div:
                 max=1,
                 className="text-input",
             ),
+            html.Label("Confidence Threshold", className="form-label"),
+            dbc.Input(
+                id="init-confidence-threshold",
+                type="number",
+                value=defaults["confidence_threshold"],
+                step=0.05,
+                min=0,
+                max=1,
+                className="text-input",
+            ),
             html.Label("Candidates / Iteration", className="form-label"),
             dbc.Input(
                 id="init-candidates-per-iteration",
@@ -100,6 +110,49 @@ def _generation_parameters_form() -> html.Div:
     )
 
 
+def _provider_form() -> html.Div:
+    """Build the provider configuration form shown in the sidebar."""
+    return html.Div(
+        className="provider-form",
+        children=[
+            html.Label("Provider", className="form-label"),
+            dbc.Select(
+                id="init-provider",
+                options=[
+                    {"label": "IAEDU", "value": "iaedu"},
+                    {"label": "OpenAI", "value": "openai"},
+                ],
+                value="iaedu",
+                className="text-input",
+            ),
+            html.Label("IAEDU API Key", className="form-label"),
+            dbc.Input(
+                id="init-iaedu-api-key",
+                type="password",
+                placeholder="Paste IAEDU key or rely on .env",
+                className="text-input",
+            ),
+            html.Label("OpenAI API Key", className="form-label"),
+            dbc.Input(
+                id="init-openai-api-key",
+                type="password",
+                placeholder="sk-...",
+                className="text-input",
+            ),
+            html.Label("OpenAI Model", className="form-label"),
+            dbc.Input(
+                id="init-openai-model",
+                type="text",
+                value="gpt-4.1-mini",
+                className="text-input",
+            ),
+            html.Div(
+                "IAEDU uses the notebook endpoint defaults unless workspace variables override them.",
+                className="provider-note",
+            ),
+        ],
+    )
+
 def _create_sidebar_forms() -> html.Div:
     return html.Div(
         className="sidebar-forms",
@@ -113,10 +166,7 @@ def _create_sidebar_forms() -> html.Div:
                         title="Generation Parameters",
                     ),
                     dbc.AccordionItem(
-                        [
-                            html.P("This is the content of the second section"),
-                            dbc.Button("Don't click me!", color="danger"),
-                        ],
+                        [_provider_form()],
                         title="Model Provider",
                     )
                 ],
@@ -134,12 +184,60 @@ def create_sidebar() -> html.Div:
             html.Hr(),
             html.P("Ontology automatic generation", className="lead"),
             _create_sidebar_forms(),
-            dbc.Button("Generate",id="generate-button", color="primary", className="mb-3 mt-4 w-100", n_clicks=0),
+            dbc.Button(
+                "Generate",
+                id="generate-button", 
+                color="primary", 
+                className="mb-3 mt-4 w-100", 
+                n_clicks=0
+            ),
+            html.Div(
+                className="theme-toggle",
+                children=[
+                    html.Span("Automatic"),
+                    dbc.Switch(
+                        id="mode-switch",
+                        value=False,
+                    ),
+                    html.Span("Manual"),
+                ],
+            ),
 
         ]
     )
 
+def create_modal_form() -> html.Div:
 
+    domain_input = html.Div(
+        [
+            dbc.Label("Domain", html_for="domain-input"),
+            dbc.Input(type="text", id="domain-input", placeholder="Enter domain"),
+            dbc.FormText(
+                "Enter the domain for the ontology generation",
+                color="secondary",
+            ),
+        ],
+        className="mb-3",
+    )
+
+    scope_input = html.Div(
+        [
+            dbc.Label("Scope", html_for="scope-input"),
+            dbc.Textarea(
+                id="scope-input",
+                size="lg",
+                placeholder="Enter scope",
+            ),
+        ],
+        className="mb-3",
+    )
+
+    form = dbc.Form([domain_input, scope_input])
+
+    return form
+
+
+## OLD:
 
 
 def create_topbar(pathname: str | None) -> html.Div:
@@ -221,7 +319,10 @@ def node_detail_panel(details: Dict[str, Any] | None) -> html.Div:
             className="node-panel-body",
             children=[
                 html.Div("NODE_DETAILS", className="panel-eyebrow"),
-                html.P("Select a node in the graph to inspect and expand it.", className="page-subtitle"),
+                html.P(
+                    "Select a node in the graph to inspect it, or right-click an expandable node to expand it directly.",
+                    className="page-subtitle",
+                ),
             ],
         )
 
@@ -289,3 +390,46 @@ def node_detail_panel(details: Dict[str, Any] | None) -> html.Div:
         )
 
     return html.Div(className="node-panel-body", children=children)
+
+
+def manual_expansion_progress_panel(snapshot: Dict[str, Any]) -> html.Div:
+    """Render live progress and logs for a background manual expansion."""
+    logs = snapshot.get("recent_logs", [])
+    log_output = "\n".join(logs[-80:]) if logs else "Waiting for manual expansion logs..."
+    active = bool(snapshot.get("manual_expansion_active"))
+    status = str(snapshot.get("generation_status", "idle"))
+    node = snapshot.get("manual_expansion_node") or "-"
+    last_error = snapshot.get("last_error")
+    message = last_error or snapshot.get("last_message") or "Manual expansion queued."
+    progress_value = 55 if active else 100
+    progress_label = "Expanding..." if active else status.replace("_", " ").upper()
+    status_class = "form-status form-status-warning" if active else "form-status form-status-success"
+    if last_error:
+        status_class = "form-status form-status-error"
+
+    return html.Div(
+        className="manual-expansion-progress",
+        children=[
+            html.Div("MANUAL_EXPANSION", className="panel-eyebrow"),
+            html.H3(f"Expanding from: {node}", className="panel-title"),
+            html.Div(message, className=status_class),
+            dbc.Progress(
+                value=progress_value,
+                label=progress_label,
+                striped=active,
+                animated=active,
+                className="mb-3",
+            ),
+            html.Div(
+                className="metric-row",
+                children=[
+                    metric_card("Status", status.upper()),
+                    metric_card("Iterations", len(snapshot.get("iteration_log", []))),
+                    metric_card("Nodes", snapshot.get("node_count", 0)),
+                    metric_card("Elapsed", f"{float(snapshot.get('elapsed_seconds', 0.0)):.1f}s"),
+                ],
+            ),
+            html.Div("RUN_LOG", className="panel-eyebrow"),
+            html.Pre(log_output, className="log-console manual-expansion-log"),
+        ],
+    )

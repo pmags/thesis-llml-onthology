@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import dash_bootstrap_components as dbc
 import dash_cytoscape as cyto
 from dash import Dash, Input, Output, State, dcc, html, callback_context
 from dash.exceptions import PreventUpdate
 
-from app.components import empty_state, node_detail_panel
-from app.cytoscape_utils import CYTOSCAPE_STYLESHEET, build_node_details, graph_to_cytoscape
+from app.components import empty_state, manual_expansion_progress_panel, node_detail_panel
+from app.cytoscape_utils import (
+    CYTOSCAPE_STYLESHEET,
+    build_node_details,
+    EXPAND_CONTEXT_MENU,
+    EXPAND_CONTEXT_MENU_ID,
+    graph_to_cytoscape,
+)
 from app.state import get_app_state
 
 
@@ -69,6 +76,7 @@ def layout() -> html.Div:
                                 minZoom=0.2,
                                 maxZoom=2.5,
                                 zoom=1,
+                                contextMenu=EXPAND_CONTEXT_MENU,
                             ),
                             html.Div(
                                 className="graph-toolbar",
@@ -105,6 +113,15 @@ def layout() -> html.Div:
                     ),
                 ],
             ),
+            dbc.Offcanvas(
+                id="explorer-manual-expansion-offcanvas",
+                title="Manual Expansion Progress",
+                placement="bottom",
+                is_open=False,
+                scrollable=True,
+                children=html.Div(id="explorer-manual-expansion-content"),
+                style={"height": "70vh"},
+            ),
         ],
     )
 
@@ -112,8 +129,17 @@ def layout() -> html.Div:
 def register_callbacks(app: Dash) -> None:
     """Register explorer-page callbacks."""
 
-    @app.callback(Output("explorer-selected-node", "data"), Input("ontology-graph", "tapNodeData"))
-    def remember_selected_node(node_data: dict | None):
+    @app.callback(
+        Output("explorer-selected-node", "data"),
+        Input("ontology-graph", "tapNodeData"),
+        Input("ontology-graph", "contextMenuData"),
+    )
+    def remember_selected_node(node_data: dict | None, context_menu_data: dict | None):
+        triggered_prop = callback_context.triggered[0]["prop_id"]
+        if triggered_prop == "ontology-graph.contextMenuData" and context_menu_data:
+            context_node_id = context_menu_data.get("elementId")
+            if context_node_id:
+                return context_node_id
         if not node_data:
             raise PreventUpdate
         return node_data.get("id")
@@ -125,6 +151,8 @@ def register_callbacks(app: Dash) -> None:
         Output("explorer-system-message", "children"),
         Output("explorer-system-message", "className"),
         Output("explorer-interval", "disabled"),
+        Output("explorer-manual-expansion-content", "children"),
+        Output("explorer-manual-expansion-offcanvas", "is_open"),
         Input("explorer-interval", "n_intervals"),
         Input("explorer-refresh-signal", "data"),
         Input("graph-layout-dropdown", "value"),
@@ -163,7 +191,8 @@ def register_callbacks(app: Dash) -> None:
             zoom_value = max((current_zoom or 1) - 0.15, 0.2)
 
         snapshot = app_state.snapshot()
-        interval_disabled = snapshot["generation_status"] != "running"
+        manual_expansion_active = bool(snapshot["manual_expansion_active"])
+        interval_disabled = snapshot["generation_status"] not in {"manual_expanding", "running"}
         banner_class = "system-banner"
         banner_text = snapshot["last_message"]
         if snapshot["last_error"]:
@@ -181,6 +210,8 @@ def register_callbacks(app: Dash) -> None:
             banner_text,
             banner_class,
             interval_disabled,
+            manual_expansion_progress_panel(snapshot),
+            manual_expansion_active,
         )
 
     @app.callback(
@@ -218,26 +249,41 @@ def register_callbacks(app: Dash) -> None:
         Output("explorer-action-message", "className"),
         Output("explorer-refresh-signal", "data"),
         Input("expand-node-button", "n_clicks"),
+        Input("ontology-graph", "contextMenuData"),
         State("explorer-selected-node", "data"),
         State("explorer-refresh-signal", "data"),
         prevent_initial_call=True,
     )
     def manually_expand_node(
         n_clicks: int | None,
+        context_menu_data: dict | None,
         selected_node: str | None,
         refresh_signal: int,
     ):
-        if not n_clicks or not selected_node:
+        triggered_prop = callback_context.triggered[0]["prop_id"]
+        if triggered_prop == "ontology-graph.contextMenuData":
+            if not context_menu_data or context_menu_data.get("menuItemId") != EXPAND_CONTEXT_MENU_ID:
+                raise PreventUpdate
+            node_to_expand = context_menu_data.get("elementId")
+        else:
+            if not n_clicks:
+                raise PreventUpdate
+            node_to_expand = selected_node
+
+        if not node_to_expand:
             raise PreventUpdate
 
         try:
-            result = get_app_state().expand_node(selected_node)
-        except RuntimeError as exc:
-            return str(exc), "form-status form-status-error explorer-action", refresh_signal
+            get_app_state().start_manual_expansion(node_to_expand)
+        except (RuntimeError, ValueError) as exc:
+            return (
+                str(exc),
+                "form-status form-status-error explorer-action",
+                refresh_signal,
+            )
 
         return (
-            f"Expanded {selected_node}: {result['candidates_accepted']}/"
-            f"{result['candidates_generated']} accepted, reward {result['reward']:.3f}.",
-            "form-status form-status-success explorer-action",
+            f"Expanding {node_to_expand}. Progress and logs are shown below.",
+            "form-status form-status-warning explorer-action",
             refresh_signal + 1,
         )

@@ -12,6 +12,15 @@ RELATION_LABELS = {
     "type": "rdf:type",
 }
 
+EXPAND_CONTEXT_MENU_ID = "expand-ontology-from-node"
+EXPAND_CONTEXT_MENU: List[Dict[str, Any]] = [
+    {
+        "id": EXPAND_CONTEXT_MENU_ID,
+        "label": "Expand ontology from this node",
+        "availableOn": ["node"],
+    }
+]
+
 
 CYTOSCAPE_STYLESHEET: List[Dict[str, Any]] = [
     {

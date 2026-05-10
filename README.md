@@ -243,3 +243,12 @@ This is a thesis project for research purposes.
 - **Algorithm Documentation**: [docs/algorithm.md](docs/algorithm.md)
 - **Main Notebook**: [notebooks/ontogen_sandbox.ipynb](notebooks/ontogen_sandbox.ipynb)
 - **W3C RDF Schema**: https://www.w3.org/TR/rdf-schema/
+
+
+## PARA APAGAR
+
+![alt text](image.png)
+https://bootswatch.com/brite/
+https://getbootstrap.com/docs/4.0/utilities/spacing/
+https://icons.getbootstrap.com/
+https://www.dash-bootstrap-components.com/docs/components/modal/

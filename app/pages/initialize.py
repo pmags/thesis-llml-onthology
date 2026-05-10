@@ -266,13 +266,13 @@ def layout() -> html.Div:
                                     children=[
                                         html.Div("SESSION_NOTES", className="panel-eyebrow"),
                                         kv_rows(
-                                            {
-                                                "default_provider": "IAEDU",
-                                                "automatic_generation": "UCB1 bandit",
-                                                "manual_expansion": "node panel action",
-                                                "graph_renderer": "dash_cytoscape",
-                                            }
-                                        ),
+                                                {
+                                                    "default_provider": "IAEDU",
+                                                    "automatic_generation": "UCB1 bandit",
+                                                    "manual_expansion": "node panel or graph right-click",
+                                                    "graph_renderer": "dash_cytoscape",
+                                                }
+                                            ),
                                     ],
                                 ),
                                 html.Div(
