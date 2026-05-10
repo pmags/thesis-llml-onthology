@@ -6,25 +6,43 @@ build-backend = "setuptools.build_meta"
 name = "ontogen"
 version = "0.1.0"
 description = "LLM-driven ontology generation from domain descriptions"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
-    "openai",
-    "requests",
-    "rdflib",
+    "chromadb",
+    "dash",
+    "dash-cytoscape",
+    "dash-bootstrap-components",
+    "graphviz",
+    "ipykernel",
+    "ipython",
+    "ipywidgets",
+    "kglab",
+    "matplotlib",
     "networkx",
-    "python-louvain",
-    "pandas",
+    "nltk",
     "numpy",
-    "scipy",
-    "scikit-learn",
-    "python-dotenv",
+    "openai",
+    "pandas",
     "pydotplus",
+    "pyodbc",
+    "python-dotenv",
+    "python-louvain",
+    "rdflib",
+    "requests",
+    "scikit-learn",
+    "scipy",
+    "seaborn",
+    "spacy"
 ]
 
 [project.optional-dependencies]
-app = ["gradio"]
-dev = ["pytest", "pytest-cov", "flake8"]
-notebooks = ["ipykernel", "ipywidgets", "matplotlib", "seaborn"]
+dev = [
+    "flake8",
+    "mypy",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

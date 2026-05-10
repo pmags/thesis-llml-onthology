@@ -1,5 +1,1 @@
-"""
-Gradio web application for interactive ontology generation.
-
-Launch with: python -m app.main
-"""
+"""Dash web application package for interactive ontology generation."""

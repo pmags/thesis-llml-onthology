@@ -1,68 +1,35 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/miniconda
 {
-	"name": "Miniconda (Python 3)",
-	"build": { 
-		"context": "..",
-		"dockerfile": "Dockerfile",
-		"args": {
-			"AZURE_DEVOPS_PAT": "${localEnv:AZURE_DEVOPS_PAT}"
-		}
-	},
-	// "features": {
-	// 	"ghcr.io/devcontainers/features/python:1": {
-	// 		"version": "latest"
-	// 	}
-	// },
-
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				"ms-toolsai.jupyter",
-				"ms-python.pylint",
-				"ms-toolsai.vscode-ai-remote",
-				"oderwat.indent-rainbow",
-				"yzhang.markdown-all-in-one",
-				"samuelcolvin.jinjahtml",
-				"ms-python.python",
-				"mechatroner.rainbow-csv",
-				"ms-python.vscode-pylance",
-				"bierner.markdown-mermaid",
-				"ms-semantic-kernel.semantic-kernel",
-				"KevinRose.vsc-python-indent",
-				"ms-python.debugpy",
-				"ms-python.vscode-python-envs",
-				"njpwerner.autodocstring",
-				"GitHub.copilot",
-				"ms-toolsai.datawrangler"
-			],
-			"settings": {
-				"[python]": {
-					"defaultInterpreterPath": "/opt/conda/bin/python",
-					"editor.defaultFormatter": "ms-python.black-formatter",
-					"editor.formatOnType": true,
-					"editor.formatOnSave": true
-				},
-				"[jupyter]": {
-					"themeMatplotlibPlots": true,
-					"widgetScriptSources": [
-						"unpkg.com",
-						"jsdelivr.com"
-					]
-				}
-			}
-		}
-	},
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-
-	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand":"sudo apt-get update && sudo apt install git-lfs && git config --global credential.useHttpPath true"
-
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
+  "name": "Python + uv",
+  "dockerComposeFile": "./docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "vscode",
+  "features": {
+	"ghcr.io/devcontainers-extra/features/uv:1": {},
+	"ghcr.io/devcontainers/features/common-utils:2": {},
+	"ghcr.io/devcontainers/features/copilot-cli:1": {},
+	"ghcr.io/devcontainers/features/git:1": {},
+	"ghcr.io/devcontainers/features/node:2": {},
+	"ghcr.io/devcontainers-extra/features/ruff:2": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker",
+        "ms-toolsai.jupyter",
+        "DavidAnson.vscode-markdownlint"
+      ]
+    }
+  },
+  "remoteEnv": {
+    "PROJECT_NAME": "Python + uv",
+    "PYTHON_VERSION": "3.12",
+    "UV_INIT_BARE": "true",
+    "INSTALL_IPYKERNEL": "true"
+  },
+  "postCreateCommand": "make post-create",
+  "mounts": []
 }
