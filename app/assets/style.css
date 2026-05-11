@@ -387,7 +387,7 @@ body {
   font-size: 0.82rem;
   line-height: 1.55;
   margin: 0;
-  max-height: 320px;
+  max-height: 420px;
   min-height: 240px;
   overflow: auto;
   padding: 16px;
@@ -405,7 +405,7 @@ body {
 
 .run-progress-section {
   display: grid;
-  gap: 18px;
+  gap: 24px;
 }
 
 .run-progress-panel,

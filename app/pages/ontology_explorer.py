@@ -75,6 +75,7 @@ def _render_onboarding_view() -> html.Div:
             html.Div(
                 className="onboarding-stage",
                 children=[
+                    html.H1("Quickstart:", className="onboarding-title"),  
                     html.Div(
                         className="onboarding-sequence",
                         children=[
@@ -288,7 +289,7 @@ def _render_progress_view(snapshot: Dict[str, Any]) -> html.Div:
             html.Div(
                 className="content-card",
                 children=[
-                    html.Div("RUN_LOG", className="panel-eyebrow"),
+                    #html.Div("RUN_LOG", className="panel-eyebrow"),
                     html.Pre(logs, className="log-console"),
                 ],
             ),
